@@ -20,15 +20,17 @@ bool OpticalInput::initialize() {
         delayMicroseconds(50);
     }
 
-    // Hardware timer at the configured sample rate
-    // timerBegin(frequency) returns a handle; alarm every 1/sample_rate seconds
-    timer_ = timerBegin(sample_rate_hz_);
+    // Hardware timer: 1 MHz base clock for clean integer division
+    // Alarm every (1 000 000 / sample_rate) ticks → exact sample rate
+    const uint32_t TIMER_HZ = 1000000UL;
+    timer_ = timerBegin(TIMER_HZ);
     if (!timer_) {
         return false;
     }
 
     timerAttachInterrupt(timer_, &OpticalInput::on_timer);
-    timerAlarm(timer_, 1, true, 0);   // alarm every 1 tick, auto-reload
+    const uint64_t alarm_ticks = TIMER_HZ / sample_rate_hz_;
+    timerAlarm(timer_, alarm_ticks, true, 0);   // auto-reload, unlimited
 
     // Pre-fill so the first block is not all zeros
     for (size_t i = 0; i < DUCK_SAMPLES_PER_BLOCK; ++i) {
