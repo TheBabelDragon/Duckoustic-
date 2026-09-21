@@ -1,55 +1,131 @@
 # Duckoustic
 
-**ESP32-S3 optical microphone firmware**
-
-Laser → vibrating reflective target → BPW34 → analog front end → ESP32-S3 ADC
-
----
-
-## Status: v0.1 — "ESP32-S3 can see the duck"
-
-This is a hardware-first milestone. The firmware proves that the ESP32-S3 can acquire a usable optical vibration signal. Nothing else is implemented yet.
-
-| Feature              | v0.1 |
-|----------------------|------|
-| ADC acquisition      | ✅   |
-| Timer-driven sampling| ✅   |
-| Block statistics     | ✅   |
-| Serial diagnostics   | ✅   |
-| Signal / no-signal   | ✅   |
-| Speaker output       | ❌   |
-| FFT / spectrum       | ❌   |
-| Networking           | ❌   |
-| Servo / laser control| ❌   |
-
----
-
-## Hardware test path
+**ESP32-S3 optical microphone + optical audio player**
 
 ```
-laser (externally powered)
+Laser → vibrating reflective target → BPW34 → AFE → ESP32-S3 ADC
+                                                      ↕
+Phone browser ── Wi-Fi SoftAP ── upload WAV / PLAY ── Laser PWM
+```
+
+---
+
+## Status: v0.2 — Browser Audio Upload + Optical Playback
+
+| Feature                    | v0.1 | v0.2 |
+|----------------------------|------|------|
+| ADC acquisition (BPW34)    | ✅   | ✅   |
+| Timer-driven sampling      | ✅   | ✅   |
+| Block statistics           | ✅   | ✅   |
+| Serial diagnostics         | ✅   | ✅   |
+| Wi-Fi SoftAP               | ❌   | ✅   |
+| Browser UI                 | ❌   | ✅   |
+| WAV upload (PCM 8 kHz)     | ❌   | ✅   |
+| PlaybackEngine → laser PWM | ❌   | ✅   |
+| Listen / Clone modes       | ❌   | ✅   |
+| MP3 / AAC decode           | ❌   | later |
+| Classic BT / A2DP          | ❌   | not planned (S3 has no Classic BT) |
+| BLE control                | ❌   | later (discovery / config only) |
+
+**Why Wi-Fi first, not Bluetooth?**  
+ESP32-S3 has 2.4 GHz Wi-Fi and BLE, but **no Classic Bluetooth / A2DP**. BLE is awkward for arbitrary audio-file upload. SoftAP + browser gives:
+
+> Power on → join `Duckoustic-XXXX` → open `http://192.168.4.1/` → choose WAV → PLAY.
+
+No app. No pairing. No router.
+
+---
+
+## Architecture
+
+```
+                 PHONE
+          Safari / Chrome
+                 │
+          Wi-Fi / SoftAP
+                 │
+                 ▼
+          ESP32-S3 web UI
+                 │
+        ┌────────┐
+        │                 │
+    upload audio      controls
+        │          play / stop / loop
+        ▼
+   LittleFS (audio.wav)
+        │
+        ▼
+   PlaybackEngine  ──►  LaserOutput (PWM)
+                              │
+                              ▼
+                         optical path
+                              │
+                              ▼
+                           BPW34 → ADC   (LISTEN telemetry)
+```
+
+Firmware layers (intentionally decoupled):
+
+```
+web/          SoftAP, HTTP, upload, status, control
+audio/        WavReader, PlaybackEngine
+optical/      LaserOutput (modulation + safety limits)
+input/        OpticalInput (BPW34 ADC) — unchanged from v0.1
+telemetry/    serial diagnostics
+```
+
+`PlaybackEngine` does **not** know about Wi-Fi. Later it can be fed from live ADC, BLE chunks, or a learned clone representation without touching the web layer.
+
+### Modes
+
+| Mode   | Source                         | Output              |
+|--------|--------------------------------|---------------------|
+| LISTEN | BPW34 → ADC (live)             | telemetry only*     |
+| CLONE  | uploaded WAV → PlaybackEngine  | LaserOutput (PWM)   |
+
+\* Future: LISTEN can drive the same `LaserOutput` for a true optical passthrough / feedback experiment.
+
+---
+
+## Hardware
+
+### Input path (v0.1, still active)
+
+```
+laser (external power / external enable)
     ↓
 reflective / vibrating target
     ↓
-reflected light
-    ↓
 BPW34 photodiode
     ↓
-external analog front-end
-  (e.g. XH-A901 board with NE5532 stage —
-   treated as a black-box gain/buffer stage;
-   not assumed to be a classic TIA)
+analog front-end (e.g. XH-A901 / NE5532 stage)
     ↓
-ESP32-S3 ADC (configurable GPIO)
+ESP32-S3 ADC  (default GPIO4)
 ```
 
-The firmware **never** drives the laser. The laser is under external control. The ESP32-S3 only observes the BPW34 signal after the analog front-end.
+### Output path (v0.2)
 
-### Safety notes
+```
+PlaybackEngine PCM
+    ↓
+LaserOutput  (PWM, default GPIO5)
+    ↓
+laser modulator / driver transistor
+    ↓
+optical field  →  (optional) BPW34 again for closed-loop experiments
+```
 
-- Keep the analog front-end output within the ESP32-S3 ADC input range (see `DUCK_ADC_ATTEN`).
-- Default attenuation is set conservatively (`ADC_11db` ≈ 0–3.1 V).
-- Do not exceed the absolute maximum ratings of the GPIO.
+Optional acoustic monitoring (not required for v0.2 firmware):
+
+```
+AFE tap → XH-A901 → PAM8403 → speaker
+```
+
+### Safety
+
+- Laser enable is software-gated (`LaserOutput::set_enabled`).
+- PWM duty is hard-capped by `DUCK_LASER_MAX_DUTY` (default 85 %).
+- Firmware never assumes the laser is eye-safe; treat the optical path as a Class-appropriate laser system under your control.
 
 ---
 
@@ -58,96 +134,103 @@ The firmware **never** drives the laser. The laser is under external control. Th
 ### Requirements
 
 - PlatformIO
-- ESP32-S3 board (tested target: `esp32-s3-devkitc-1`)
-- BPW34 (or equivalent) + analog front-end wired to the configured ADC pin
+- ESP32-S3 board (`esp32-s3-devkitc-1` or compatible)
+- BPW34 + AFE on `DUCK_ADC_PIN` (default GPIO4)
+- Laser modulator on `DUCK_LASER_PWM_PIN` (default GPIO5)
 
 ### Build & flash
 
 ```bash
 pio run -t upload
+pio run -t uploadfs   # only if you later add data/ assets; UI is embedded
 pio device monitor
 ```
 
-### Expected serial output
+### Phone workflow
 
-```
-DUCKOUSTIC v0.1
-BPW34 INPUT: READY
-LASER INPUT: EXTERNAL
-TARGET: OPTICAL VIBRATION
+1. Power the board.
+2. Join Wi-Fi network **`Duckoustic-XXXX`** (XXXX = last 4 hex of MAC). Open network by default.
+3. Open **http://192.168.4.1/**
+4. Choose a **mono 8 kHz 16-bit PCM WAV**.
+5. PLAY. Toggle laser, gain, Listen / Clone as needed.
 
-ADC pin GPIO4  sample_rate=8000 Hz  block=256 samples
-Acquisition running…
+### WAV contract (v0.2)
 
-DUCKOUSTIC sample_rate=8000 dc=1842 min=1831 max=1855 peak_to_peak=24 rms=4.2 signal=NO_SIGNAL
-DUCKOUSTIC sample_rate=8000 dc=1840 min=1720 max=1965 peak_to_peak=245 rms=38.1 signal=SIGNAL_DETECTED
-```
+| Parameter     | Required        |
+|---------------|-----------------|
+| Container     | RIFF WAVE       |
+| Format        | PCM (format 1)  |
+| Channels      | 1 (mono)        |
+| Sample rate   | 8000 Hz         |
+| Bits          | 16 signed LE    |
 
-- With the laser off / beam blocked you should see low `peak_to_peak` and `NO_SIGNAL`.
-- Blocking/unblocking the BPW34 or vibrating the reflective target should raise `peak_to_peak` and flip the flag to `SIGNAL_DETECTED`.
+Other rates / codecs can be added later behind a decoder → PCM stage; the playback engine stays the same.
 
 ---
 
 ## Configuration
 
-All tunables live in `include/config.h`:
+All tunables: `include/config.h`
 
-| Macro                      | Default | Meaning                                      |
-|----------------------------|---------|----------------------------------------------|
-| `DUCK_ADC_PIN`             | 4       | GPIO connected to AFE output (ADC1 channel)  |
-| `DUCK_ADC_ATTEN`           | ADC_11db| Attenuation / full-scale range               |
-| `DUCK_SAMPLE_RATE_HZ`      | 8000    | Target sample rate                           |
-| `DUCK_SAMPLES_PER_BLOCK`   | 256     | Samples per statistics block                 |
-| `DUCK_DC_REMOVAL`          | true    | Subtract block mean before RMS               |
-| `DUCK_SIGNAL_THRESHOLD`    | 40      | peak-to-peak counts → SIGNAL_DETECTED        |
-| `DUCK_TELEMETRY_INTERVAL_MS`| 250    | Serial report interval                       |
-| `DUCK_RAW_DEBUG`           | false   | Reserved for optional raw dumps              |
+| Macro | Default | Meaning |
+|-------|---------|---------|
+| `DUCK_ADC_PIN` | 4 | BPW34 AFE → ADC |
+| `DUCK_SAMPLE_RATE_HZ` | 8000 | Acquisition rate |
+| `DUCK_LASER_PWM_PIN` | 5 | Laser modulator PWM |
+| `DUCK_LASER_MAX_DUTY` | 0.85 | Safety duty ceiling |
+| `DUCK_AP_SSID_PREFIX` | `Duckoustic-` | SoftAP name prefix |
+| `DUCK_AP_PASSWORD` | `""` | Empty = open |
+| `DUCK_AUDIO_PATH` | `/audio.wav` | LittleFS path |
+| `DUCK_MAX_UPLOAD_BYTES` | 1 MiB | Upload size limit |
+| `DUCK_DEFAULT_GAIN` | 0.6 | Initial laser gain |
 
 ---
 
-## Architecture (kept intentionally small)
+## Serial banner (expected)
 
 ```
-OpticalInput          ← timer ISR + double-buffer ADC acquisition
-    ↓
-SignalProcessor       ← DC / min / max / peak-to-peak / RMS / threshold
-    ↓
-Telemetry             ← periodic serial diagnostics
+DUCKOUSTIC v0.2
+BPW34 INPUT: READY
+LASER OUTPUT: PWM
+TRANSPORT: Wi-Fi SoftAP + browser
+TARGET: optical vibration + clone playback
 
-Configuration         ← include/config.h
-```
-
-Future versions can insert stages between OpticalInput and any audio/FFT/network layer without touching the ADC code:
-
-```
-OpticalInput
-    ↓
-DC removal / filtering
-    ↓
-Audio buffer
-    ↓
-FFT / spectral analysis
-    ↓
-audio output / visualisation / network stream
+SoftAP SSID: Duckoustic-A1B2
+SoftAP IP:   192.168.4.1
+HTTP server on http://192.168.4.1/
+ADC pin GPIO4  sample_rate=8000 Hz  block=256 samples
+Laser PWM pin GPIO5
+Ready — connect phone to SoftAP, open http://192.168.4.1/
 ```
 
 ---
 
-## Acceptance criteria (v0.1)
+## Acceptance criteria (v0.2)
 
-- [x] ESP32-S3 boots and prints the banner
-- [x] ADC acquisition runs continuously at the configured rate
-- [x] Serial diagnostics show stable values with the optical path quiet
-- [x] Blocking / unblocking the BPW34 changes the reported signal level
-- [x] Moving / vibrating the reflective target produces measurable variation
-- [x] Firmware stays responsive during continuous acquisition
-- [x] No ADC value is reported outside the configured safe range
-- [x] Acquisition layer is cleanly separated from signal processing & telemetry
+- [x] SoftAP comes up as `Duckoustic-XXXX` at 192.168.4.1
+- [x] Browser UI loads with no external CDN
+- [x] Valid mono 8 kHz 16-bit WAV uploads to LittleFS
+- [x] Invalid WAV is rejected with a clear JSON error
+- [x] PLAY drives `LaserOutput` PWM at sample rate
+- [x] STOP idles the laser output
+- [x] Gain and laser enable are controllable from the UI
+- [x] Listen / Clone mode switch exists (Clone uses file; Listen keeps ADC path)
+- [x] v0.1 optical acquisition + serial telemetry still run
+- [x] `PlaybackEngine` has no Wi-Fi includes
 
-**Definition of done:** *ESP32-S3 can see the duck.*
+**Definition of done:** *Phone → browser → WAV → optical clone.*
+
+---
+
+## Roadmap notes
+
+- **MP3/AAC**: decode → PCM → same `PlaybackEngine`.
+- **BLE**: discovery, provisioning, small control messages — not primary audio transport.
+- **Clone feedback**: LISTEN optical signal → estimate transfer function → compensated CLONE output.
+- **Speaker path**: optional DAC/I2S → PAM8403 for acoustic monitoring of the same buffer.
 
 ---
 
 ## License
 
-MIT (or project default)
+MIT
