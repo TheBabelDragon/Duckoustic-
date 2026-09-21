@@ -3,21 +3,38 @@
 #include <Arduino.h>
 
 // ---------------------------------------------------------------------------
-// Duckoustic v0.2.2 configuration
-// All tunable parameters live here so the rest of the code stays clean.
+// Duckoustic configuration
 // ---------------------------------------------------------------------------
 
 namespace duckoustic {
 
 // ---------------------------------------------------------------------------
-// Optical input (BPW34 → AFE → ADC) — GPIO4 KEEP
+// Optical input (BPW34 anode rails → ADC)
+// LEFT  anode → GPIO4; RIGHT anode → GPIO7; cathode rails → +3.3V (HW)
 // ---------------------------------------------------------------------------
 #ifndef DUCK_ADC_PIN
-#define DUCK_ADC_PIN            4          // GPIO4 = ADC1_CH3 (BPW34 array)
+#define DUCK_ADC_PIN            4          // GPIO4 LEFT BPW34 anode rail
+#endif
+
+#ifndef DUCK_ADC_LEFT_PIN
+#define DUCK_ADC_LEFT_PIN       DUCK_ADC_PIN
+#endif
+
+#ifndef DUCK_ADC_RIGHT_PIN
+#define DUCK_ADC_RIGHT_PIN      7          // GPIO7 RIGHT BPW34 anode rail
 #endif
 
 #ifndef DUCK_ADC_ATTEN
 #define DUCK_ADC_ATTEN          ADC_11db
+#endif
+
+// Optical receive mode: mono (GPIO4 only) or stereo (GPIO4 L + GPIO7 R)
+enum class OpticalChannelMode : uint8_t {
+    Mono   = 0,
+    Stereo = 1
+};
+#ifndef DUCK_OPTICAL_DEFAULT_STEREO
+#define DUCK_OPTICAL_DEFAULT_STEREO  0
 #endif
 
 #ifndef DUCK_SAMPLE_RATE_HZ
@@ -48,15 +65,12 @@ namespace duckoustic {
 #define DUCK_SERIAL_BAUD        115200
 #endif
 
-// ---------------------------------------------------------------------------
-// SoftAP / Wi-Fi
-// ---------------------------------------------------------------------------
 #ifndef DUCK_AP_SSID_PREFIX
 #define DUCK_AP_SSID_PREFIX     "Duckoustic-"
 #endif
 
 #ifndef DUCK_AP_PASSWORD
-#define DUCK_AP_PASSWORD        ""         // open network (empty)
+#define DUCK_AP_PASSWORD        ""
 #endif
 
 #ifndef DUCK_AP_CHANNEL
@@ -67,18 +81,7 @@ namespace duckoustic {
 #define DUCK_AP_MAX_CONN        4
 #endif
 
-// ---------------------------------------------------------------------------
-// Stereo audio PWM outputs → PAM8403 INPUT stage (not speaker terminals)
-//
-//   ESP32 GPIO5 → PAM8403 IN-L
-//   ESP32 GPIO6 → PAM8403 IN-R
-//   ESP32 GND   → PAM8403 signal GND
-//
-// PAM L+/L- and R+/R- are differential power outputs — never wire to GPIO.
-// An RC reconstruction filter between GPIO and PAM input is recommended.
-// ---------------------------------------------------------------------------
-
-// Legacy alias (left channel) — kept so older references still resolve
+// Stereo audio PWM → PAM8403 INPUT (not speaker terminals)
 #ifndef DUCK_LASER_PWM_PIN
 #define DUCK_LASER_PWM_PIN          5
 #endif
@@ -99,16 +102,14 @@ namespace duckoustic {
 #define DUCK_AUDIO_RIGHT_PWM_CHANNEL 1
 #endif
 
-// PWM carrier must be substantially above the audio sample rate (8 kHz)
 #ifndef DUCK_AUDIO_PWM_FREQ_HZ
 #define DUCK_AUDIO_PWM_FREQ_HZ      80000
 #endif
 
 #ifndef DUCK_AUDIO_PWM_RES_BITS
-#define DUCK_AUDIO_PWM_RES_BITS     10         // 0..1023
+#define DUCK_AUDIO_PWM_RES_BITS     10
 #endif
 
-// Legacy aliases → audio PWM
 #ifndef DUCK_LASER_PWM_CHANNEL
 #define DUCK_LASER_PWM_CHANNEL      DUCK_AUDIO_LEFT_PWM_CHANNEL
 #endif
@@ -121,7 +122,6 @@ namespace duckoustic {
 #define DUCK_LASER_PWM_RES_BITS     DUCK_AUDIO_PWM_RES_BITS
 #endif
 
-// Safety: maximum duty fraction (0.0–1.0) applied independently per channel
 #ifndef DUCK_LASER_MAX_DUTY
 #define DUCK_LASER_MAX_DUTY         0.85f
 #endif
@@ -130,9 +130,6 @@ namespace duckoustic {
 #define DUCK_AUDIO_MAX_DUTY         DUCK_LASER_MAX_DUTY
 #endif
 
-// ---------------------------------------------------------------------------
-// Audio storage / playback
-// ---------------------------------------------------------------------------
 #ifndef DUCK_AUDIO_PATH
 #define DUCK_AUDIO_PATH         "/audio.wav"
 #endif
@@ -157,7 +154,6 @@ namespace duckoustic {
 #define DUCK_PLAYBACK_BUF_SAMPLES  512
 #endif
 
-// LISTEN passthrough: ADC counts (post-DC) that map to full-scale ±1.0
 #ifndef DUCK_LISTEN_SCALE
 #define DUCK_LISTEN_SCALE       512
 #endif

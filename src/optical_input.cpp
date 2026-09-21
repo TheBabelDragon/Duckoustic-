@@ -6,74 +6,84 @@ OpticalInput* OpticalInput::instance_ = nullptr;
 
 bool OpticalInput::initialize() {
     if (ready_) return true;
-
     instance_ = this;
 
-    // Conservative ADC setup for ESP32-S3
-    analogReadResolution(12);                     // 0…4095
-    analogSetPinAttenuation(DUCK_ADC_PIN, DUCK_ADC_ATTEN);
-    pinMode(DUCK_ADC_PIN, INPUT);
+#if DUCK_OPTICAL_DEFAULT_STEREO
+    channel_mode_ = OpticalChannelMode::Stereo;
+#else
+    channel_mode_ = OpticalChannelMode::Mono;
+#endif
 
-    // Warm-up reads so the first real samples are stable
+    analogReadResolution(12);
+    analogSetPinAttenuation(DUCK_ADC_LEFT_PIN, DUCK_ADC_ATTEN);
+    analogSetPinAttenuation(DUCK_ADC_RIGHT_PIN, DUCK_ADC_ATTEN);
+    pinMode(DUCK_ADC_LEFT_PIN, INPUT);
+    pinMode(DUCK_ADC_RIGHT_PIN, INPUT);
+
     for (int i = 0; i < 16; ++i) {
-        analogRead(DUCK_ADC_PIN);
+        analogRead(DUCK_ADC_LEFT_PIN);
+        analogRead(DUCK_ADC_RIGHT_PIN);
         delayMicroseconds(50);
     }
 
-    // Target sample period in microseconds
     const uint32_t alarm_us = 1000000UL / sample_rate_hz_;
 
 #if defined(ESP_ARDUINO_VERSION_MAJOR) && (ESP_ARDUINO_VERSION_MAJOR >= 3)
-    // Arduino-ESP32 3.x: timerBegin(frequency_hz)
-    timer_ = timerBegin(1000000UL);  // 1 MHz tick
-    if (!timer_) {
-        return false;
-    }
+    timer_ = timerBegin(1000000UL);
+    if (!timer_) return false;
     timerAttachInterrupt(timer_, &OpticalInput::on_timer);
     timerAlarm(timer_, alarm_us, true, 0);
 #else
-    // Arduino-ESP32 2.x: timerBegin(num, divider, countUp)
-    // APB 80 MHz / divider 80 → 1 MHz tick; alarm every alarm_us ticks
     timer_ = timerBegin(0, 80, true);
-    if (!timer_) {
-        return false;
-    }
+    if (!timer_) return false;
     timerAttachInterrupt(timer_, &OpticalInput::on_timer, true);
     timerAlarmWrite(timer_, alarm_us, true);
     timerAlarmEnable(timer_);
 #endif
 
-    // Pre-fill so the first block is not all zeros
     for (size_t i = 0; i < DUCK_SAMPLES_PER_BLOCK; ++i) {
-        buffer_a_[i] = 0;
-        buffer_b_[i] = 0;
+        left_a_[i] = left_b_[i] = right_a_[i] = right_b_[i] = 0;
     }
 
     ready_ = true;
     return true;
 }
 
+void OpticalInput::set_channel_mode(OpticalChannelMode m) {
+    channel_mode_ = m;
+}
+
 void IRAM_ATTR OpticalInput::on_timer() {
     OpticalInput* self = instance_;
     if (!self || !self->ready_) return;
 
-    // Fast path: single-channel oneshot read
-    int raw = analogRead(DUCK_ADC_PIN);
+    int raw_l = analogRead(DUCK_ADC_LEFT_PIN);
+    if (raw_l < 0) raw_l = 0;
+    if (raw_l > 4095) raw_l = 4095;
 
-    // Clamp to legal 12-bit range (safety net)
-    if (raw < 0)     raw = 0;
-    if (raw > 4095)  raw = 4095;
+    int raw_r = 0;
+    if (self->channel_mode_ == OpticalChannelMode::Stereo) {
+        raw_r = analogRead(DUCK_ADC_RIGHT_PIN);
+        if (raw_r < 0) raw_r = 0;
+        if (raw_r > 4095) raw_r = 4095;
+    }
+
+    self->last_raw_l_ = static_cast<int16_t>(raw_l);
+    self->last_raw_r_ = static_cast<int16_t>(raw_r);
 
     size_t idx = self->write_idx_;
-    self->active_[idx] = static_cast<int16_t>(raw);
+    self->active_left_[idx]  = static_cast<int16_t>(raw_l);
+    self->active_right_[idx] = static_cast<int16_t>(raw_r);
     idx++;
 
     if (idx >= DUCK_SAMPLES_PER_BLOCK) {
-        // Swap buffers
-        int16_t* just_filled = const_cast<int16_t*>(self->active_);
-        self->active_ = (just_filled == self->buffer_a_) ? self->buffer_b_
-                                                         : self->buffer_a_;
-        self->latest_block_ = just_filled;
+        int16_t* filled_l = const_cast<int16_t*>(self->active_left_);
+        int16_t* filled_r = const_cast<int16_t*>(self->active_right_);
+        const bool use_a = (filled_l == self->left_a_);
+        self->active_left_  = use_a ? self->left_b_  : self->left_a_;
+        self->active_right_ = use_a ? self->right_b_ : self->right_a_;
+        self->latest_left_  = filled_l;
+        self->latest_right_ = filled_r;
         self->block_ts_us_  = micros();
         self->write_idx_    = 0;
         self->block_ready_  = true;
@@ -83,30 +93,29 @@ void IRAM_ATTR OpticalInput::on_timer() {
 }
 
 bool OpticalInput::sample() {
-    if (!ready_ || !block_ready_) {
-        return false;
-    }
-
-    // Consume the flag
-    noInterrupts();
+    if (!block_ready_) return false;
     block_ready_ = false;
-    const int16_t* blk = latest_block_;
-    interrupts();
 
-    // Quick statistics on the finished block (still raw ADC counts)
-    int32_t sum = 0;
-    int16_t mn  = 4095;
-    int16_t mx  = 0;
+    const int16_t* L = latest_left_;
+    const int16_t* R = latest_right_;
+    int32_t sum_l = 0, sum_r = 0;
+    int16_t mn_l = 4095, mx_l = 0, mn_r = 4095, mx_r = 0;
+
     for (size_t i = 0; i < DUCK_SAMPLES_PER_BLOCK; ++i) {
-        int16_t v = blk[i];
-        sum += v;
-        if (v < mn) mn = v;
-        if (v > mx) mx = v;
+        const int16_t vl = L[i];
+        const int16_t vr = R[i];
+        sum_l += vl;
+        sum_r += vr;
+        if (vl < mn_l) mn_l = vl;
+        if (vl > mx_l) mx_l = vl;
+        if (vr < mn_r) mn_r = vr;
+        if (vr > mx_r) mx_r = vr;
     }
 
-    dc_level_     = static_cast<int16_t>(sum / static_cast<int32_t>(DUCK_SAMPLES_PER_BLOCK));
-    signal_level_ = static_cast<int16_t>(mx - mn);
-
+    dc_level_l_     = static_cast<int16_t>(sum_l / static_cast<int32_t>(DUCK_SAMPLES_PER_BLOCK));
+    dc_level_r_     = static_cast<int16_t>(sum_r / static_cast<int32_t>(DUCK_SAMPLES_PER_BLOCK));
+    signal_level_l_ = static_cast<int16_t>(mx_l - mn_l);
+    signal_level_r_ = static_cast<int16_t>(mx_r - mn_r);
     return true;
 }
 

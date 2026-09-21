@@ -8,48 +8,29 @@
 namespace duckoustic {
 
 /**
- * Live optical passthrough: BPW34 → ADC block → LaserOutput.
- *
- * Responsibilities:
- *   - DC-remove each acquired block
- *   - normalise to [-1, +1]
- *   - pace samples out to LaserOutput at the acquisition sample rate
- *
- * Knows nothing about Wi-Fi or files. Shares LaserOutput with PlaybackEngine;
- * only one should be active at a time (mode switch in main/WebUI).
- *
- * This is the foundation for closed-loop experiments:
- *   optical field → measure → re-modulate → observe again.
+ * Live optical passthrough → LaserOutput (PAM PWM).
+ * Mono: LEFT → write() dual mono. Stereo: L→GPIO5, R→GPIO6 (no summing).
  */
 class ListenEngine {
 public:
     ListenEngine() = default;
 
     void begin(LaserOutput* laser);
-
-    /** Arm / disarm passthrough. When disarmed, does not touch the laser. */
     void set_active(bool on);
     bool active() const { return active_; }
 
-    /**
-     * Call after OpticalInput::sample() returns true.
-     * Queues the latest block for paced emission.
-     */
     void on_block(const OpticalInput& input);
-
-    /**
-     * Emit due samples. Call frequently from loop() while active.
-     */
     void tick();
 
 private:
-    void queue_block(const int16_t* data, size_t n, int16_t dc);
+    void queue_block(const OpticalInput& input);
 
     LaserOutput* laser_ = nullptr;
     bool         active_ = false;
+    bool         stereo_ = false;
 
-    // Working buffer: DC-removed, ready to emit
-    int16_t  buf_[DUCK_SAMPLES_PER_BLOCK];
+    int16_t  buf_l_[DUCK_SAMPLES_PER_BLOCK];
+    int16_t  buf_r_[DUCK_SAMPLES_PER_BLOCK];
     size_t   buf_len_ = 0;
     size_t   buf_pos_ = 0;
 
