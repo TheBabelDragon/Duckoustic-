@@ -1,11 +1,46 @@
 #include "web_ui.h"
 #include <ArduinoJson.h>
+#include "certs/duckoustic_cert.h"
+#include "certs/duckoustic_key.h"
+
+namespace {
+
+bool decode_b64(const char* in, uint8_t* out, size_t out_cap, size_t* out_len) {
+    static const int8_t T[128] = {
+        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,62,-1,-1,-1,63,
+        52,53,54,55,56,57,58,59,60,61,-1,-1,-1,-1,-1,-1,
+        -1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9,10,11,12,13,14,
+        15,16,17,18,19,20,21,22,23,24,25,-1,-1,-1,-1,-1,
+        -1,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,
+        41,42,43,44,45,46,47,48,49,50,51,-1,-1,-1,-1,-1
+    };
+    size_t n = 0;
+    uint32_t buf = 0;
+    int bits = 0;
+    for (const char* p = in; *p; ++p) {
+        unsigned char c = (unsigned char)*p;
+        if (c == '=' || c == '\n' || c == '\r' || c == ' ') continue;
+        if (c >= 128) continue;
+        int8_t v = T[c];
+        if (v < 0) continue;
+        buf = (buf << 6) | (uint32_t)v;
+        bits += 6;
+        if (bits >= 8) {
+            bits -= 8;
+            if (n >= out_cap) return false;
+            out[n++] = (uint8_t)((buf >> bits) & 0xFF);
+        }
+    }
+    *out_len = n;
+    return n > 0;
+}
+
+} // namespace
 
 namespace duckoustic {
 
-// ---------------------------------------------------------------------------
-// Embedded minimal UI (no external assets)
-// ---------------------------------------------------------------------------
 static const char INDEX_HTML[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
 <html lang="en">
@@ -14,16 +49,15 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>DUCKOUSTIC</title>
 <style>
-  :root { --bg:#0d1117; --card:#161b22; --fg:#e6edf3; --muted:#8b949e; --acc:#3fb950; --warn:#d29922; --border:#30363d; }
+  :root { --bg:#0d1117; --card:#161b22; --fg:#e6edf3; --muted:#8b949e; --acc:#3fb950; --border:#30363d; }
   * { box-sizing:border-box; }
-  body { margin:0; font-family:system-ui,-apple-system,sans-serif; background:var(--bg); color:var(--fg); min-height:100vh; display:flex; justify-content:center; padding:1.25rem; }
+  body { margin:0; font-family:system-ui,sans-serif; background:var(--bg); color:var(--fg); min-height:100vh; display:flex; justify-content:center; padding:1.25rem; }
   .wrap { width:100%; max-width:420px; }
   h1 { font-size:1.35rem; letter-spacing:.12em; margin:0 0 1rem; text-align:center; color:var(--acc); }
   .card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:1rem 1.1rem; margin-bottom:.85rem; }
   label { display:block; font-size:.75rem; color:var(--muted); margin-bottom:.35rem; text-transform:uppercase; letter-spacing:.06em; }
   .row { display:flex; gap:.5rem; flex-wrap:wrap; margin-top:.6rem; }
   button, .file-btn { flex:1; min-width:90px; padding:.65rem .8rem; border-radius:8px; border:1px solid var(--border); background:#21262d; color:var(--fg); font-size:.9rem; cursor:pointer; }
-  button:active, .file-btn:active { transform:scale(.98); }
   button.primary { background:var(--acc); color:#0d1117; border-color:var(--acc); font-weight:600; }
   button.danger { background:#da3633; border-color:#da3633; color:#fff; }
   input[type=file] { display:none; }
@@ -33,7 +67,6 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(
   .status { font-size:.8rem; color:var(--muted); text-align:center; margin-top:.5rem; }
   .modes { display:flex; gap:.5rem; }
   .modes label { flex:1; display:flex; align-items:center; gap:.4rem; padding:.55rem .7rem; background:#21262d; border-radius:8px; border:1px solid var(--border); cursor:pointer; text-transform:none; font-size:.9rem; color:var(--fg); letter-spacing:0; }
-  .modes input { accent-color:var(--acc); }
   .bar { height:6px; background:#21262d; border-radius:3px; overflow:hidden; margin-top:.5rem; }
   .bar > i { display:block; height:100%; width:0; background:var(--acc); transition:width .2s; }
 </style>
@@ -41,7 +74,6 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(
 <body>
 <div class="wrap">
   <h1>DUCKOUSTIC</h1>
-
   <div class="card">
     <label>Audio file (PCM WAV · mono · 8 kHz · 16-bit)</label>
     <label class="file-btn" for="f">Choose Audio File</label>
@@ -53,16 +85,12 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(
       <button class="danger" id="btnStop">STOP</button>
     </div>
   </div>
-
   <div class="card">
     <label>Laser</label>
-    <div class="row">
-      <button id="btnLaser">ON / OFF</button>
-    </div>
+    <div class="row"><button id="btnLaser">ON / OFF</button></div>
     <label style="margin-top:.85rem">Gain</label>
     <input type="range" id="gain" min="0" max="100" value="60">
   </div>
-
   <div class="card">
     <label>Mode</label>
     <div class="modes">
@@ -70,24 +98,16 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(
       <label><input type="radio" name="mode" value="clone" checked> Clone (file)</label>
     </div>
   </div>
-
   <div class="status" id="status">connecting…</div>
 </div>
 <script>
 const $ = id => document.getElementById(id);
 const statusEl = $('status');
 let laserOn = false;
-
 async function api(path, opts) {
-  try {
-    const r = await fetch(path, opts);
-    return await r.json();
-  } catch (e) {
-    statusEl.textContent = 'offline';
-    return null;
-  }
+  try { const r = await fetch(path, opts); return await r.json(); }
+  catch (e) { statusEl.textContent = 'offline'; return null; }
 }
-
 async function refresh() {
   const s = await api('/api/status');
   if (!s) return;
@@ -100,60 +120,32 @@ async function refresh() {
       'Format: WAV · ' + s.sample_rate + ' Hz · ' + s.channels + ' ch · ' + s.bits + '-bit<br>' +
       'Duration: <b>' + (s.duration || 0).toFixed(2) + ' s</b> · state: ' + s.play_state;
   }
-  document.querySelectorAll('input[name=mode]').forEach(r => {
-    r.checked = (r.value === s.mode);
-  });
+  document.querySelectorAll('input[name=mode]').forEach(r => { r.checked = (r.value === s.mode); });
   let extra = '';
-  if (s.mode === 'listen') {
-    extra = s.listen_active ? ' · PASSTHROUGH' : ' · passthrough armed (enable laser)';
-  }
+  if (s.mode === 'listen') extra = s.listen_active ? ' · PASSTHROUGH' : ' · passthrough armed (enable laser)';
   statusEl.textContent = 'AP ' + (s.ssid || '') + ' · clients ' + (s.clients || 0) +
-    ' · mode ' + (s.mode || '') + extra +
-    (s.signal ? ' · optical SIGNAL' : ' · optical quiet');
+    ' · mode ' + (s.mode || '') + extra + (s.signal ? ' · optical SIGNAL' : ' · optical quiet');
 }
-
 $('f').onchange = async (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
-  const fd = new FormData();
-  fd.append('file', file, file.name);
-  $('prog').style.width = '30%';
-  statusEl.textContent = 'uploading…';
+  const file = e.target.files[0]; if (!file) return;
+  const fd = new FormData(); fd.append('file', file, file.name);
+  $('prog').style.width = '30%'; statusEl.textContent = 'uploading…';
   try {
     const r = await fetch('/api/upload', { method:'POST', body: fd });
     const j = await r.json();
     $('prog').style.width = '100%';
-    if (!j.ok) {
-      statusEl.textContent = 'upload failed: ' + (j.error || 'unknown');
-      $('prog').style.width = '0';
-      return;
-    }
-    statusEl.textContent = 'uploaded';
-    setTimeout(() => { $('prog').style.width = '0'; }, 600);
-    refresh();
-  } catch (err) {
-    statusEl.textContent = 'upload error';
-    $('prog').style.width = '0';
-  }
+    if (!j.ok) { statusEl.textContent = 'upload failed: ' + (j.error || 'unknown'); $('prog').style.width = '0'; return; }
+    statusEl.textContent = 'uploaded'; setTimeout(() => { $('prog').style.width = '0'; }, 600); refresh();
+  } catch (err) { statusEl.textContent = 'upload error'; $('prog').style.width = '0'; }
 };
-
 $('btnPlay').onclick = () => api('/api/play', { method:'POST' }).then(refresh);
 $('btnStop').onclick = () => api('/api/stop', { method:'POST' }).then(refresh);
-$('btnLaser').onclick = () => {
-  api('/api/laser', { method:'POST', headers:{'Content-Type':'text/plain'}, body: laserOn ? 'off' : 'on' }).then(refresh);
-};
-$('gain').oninput = (e) => {
-  const v = (e.target.value / 100).toFixed(2);
-  api('/api/gain', { method:'POST', headers:{'Content-Type':'text/plain'}, body: v });
-};
+$('btnLaser').onclick = () => api('/api/laser', { method:'POST', headers:{'Content-Type':'text/plain'}, body: laserOn ? 'off' : 'on' }).then(refresh);
+$('gain').oninput = (e) => api('/api/gain', { method:'POST', headers:{'Content-Type':'text/plain'}, body: (e.target.value/100).toFixed(2) });
 document.querySelectorAll('input[name=mode]').forEach(r => {
-  r.onchange = () => {
-    if (r.checked) api('/api/mode', { method:'POST', headers:{'Content-Type':'text/plain'}, body: r.value }).then(refresh);
-  };
+  r.onchange = () => { if (r.checked) api('/api/mode', { method:'POST', headers:{'Content-Type':'text/plain'}, body: r.value }).then(refresh); };
 });
-
-refresh();
-setInterval(refresh, 1500);
+refresh(); setInterval(refresh, 1500);
 </script>
 </body>
 </html>
@@ -162,11 +154,8 @@ setInterval(refresh, 1500);
 bool WebUI::begin(PlaybackEngine* playback, LaserOutput* laser,
                   OpticalInput* optical, SignalProcessor* processor,
                   ListenEngine* listen) {
-    playback_  = playback;
-    laser_     = laser;
-    optical_   = optical;
-    processor_ = processor;
-    listen_    = listen;
+    playback_ = playback; laser_ = laser; optical_ = optical;
+    processor_ = processor; listen_ = listen;
 
     if (!LittleFS.begin(true)) {
         Serial.println(F("LittleFS mount failed"));
@@ -174,26 +163,37 @@ bool WebUI::begin(PlaybackEngine* playback, LaserOutput* laser,
     }
 
     start_softap();
+    Serial.print(F("SoftAP SSID: ")); Serial.println(make_ssid());
+    Serial.print(F("SoftAP IP:   ")); Serial.println(WiFi.softAPIP());
+
+    static uint8_t cert_der[2048];
+    static uint8_t key_der[2048];
+    size_t cert_len = 0, key_len = 0;
+    if (!decode_b64(duckoustic_cert_b64, cert_der, sizeof(cert_der), &cert_len) ||
+        !decode_b64(duckoustic_key_b64, key_der, sizeof(key_der), &key_len) ||
+        cert_len == 0 || key_len == 0) {
+        Serial.println(F("FATAL: HTTPS server initialization failed (TLS material)"));
+        return false;
+    }
+    server_.setServerKeyAndCert(key_der, (int)key_len, cert_der, (int)cert_len);
+
     setup_routes();
     server_.begin();
-    Serial.println(F("HTTP server on http://192.168.4.1/"));
+    Serial.println(F("HTTPS server started"));
+    Serial.println(F("HTTPS port:  443"));
+    Serial.println(F("HTTPS URL:   https://192.168.4.1/"));
     return true;
 }
 
 void WebUI::start_softap() {
     String ssid = make_ssid();
     WiFi.mode(WIFI_AP);
-    // Open network when password empty
-    if (strlen(DUCK_AP_PASSWORD) == 0) {
+    if (strlen(DUCK_AP_PASSWORD) == 0)
         WiFi.softAP(ssid.c_str(), nullptr, DUCK_AP_CHANNEL, 0, DUCK_AP_MAX_CONN);
-    } else {
+    else
         WiFi.softAP(ssid.c_str(), DUCK_AP_PASSWORD, DUCK_AP_CHANNEL, 0, DUCK_AP_MAX_CONN);
-    }
     delay(100);
-    Serial.print(F("SoftAP SSID: "));
-    Serial.println(ssid);
-    Serial.print(F("SoftAP IP:   "));
-    Serial.println(WiFi.softAPIP());
+    Serial.println(F("SoftAP started"));
 }
 
 String WebUI::make_ssid() const {
@@ -212,23 +212,14 @@ void WebUI::setup_routes() {
     server_.on("/api/gain", HTTP_POST, [this]() { handle_gain(); });
     server_.on("/api/mode", HTTP_POST, [this]() { handle_mode(); });
     server_.on("/api/loop", HTTP_POST, [this]() { handle_loop(); });
-
-    // Multipart upload
     server_.on("/api/upload", HTTP_POST,
         [this]() { handle_upload_finish(); },
-        [this]() { handle_upload(); }
-    );
-
+        [this]() { handle_upload(); });
     server_.onNotFound([this]() { handle_not_found(); });
 }
 
-void WebUI::handle() {
-    server_.handleClient();
-}
-
-void WebUI::handle_root() {
-    server_.send_P(200, "text/html", INDEX_HTML);
-}
+void WebUI::handle() { server_.handleClient(); }
+void WebUI::handle_root() { server_.send_P(200, "text/html", INDEX_HTML); }
 
 void WebUI::handle_status() {
     JsonDocument doc;
@@ -241,7 +232,6 @@ void WebUI::handle_status() {
     doc["loop"] = loop_en_;
     doc["listen_active"] = (listen_ && listen_->active());
     doc["listen_scale"] = DUCK_LISTEN_SCALE;
-
     if (playback_ && playback_->info().valid) {
         doc["file"] = true;
         doc["filename"] = last_filename_.length() ? last_filename_ : "audio.wav";
@@ -251,57 +241,37 @@ void WebUI::handle_status() {
         doc["duration"] = playback_->duration_sec();
         const char* st = "stopped";
         switch (playback_->state()) {
-            case PlayState::Playing:  st = "playing"; break;
+            case PlayState::Playing: st = "playing"; break;
             case PlayState::Finished: st = "finished"; break;
             default: break;
         }
         doc["play_state"] = st;
-    } else {
-        doc["file"] = false;
-    }
-
-    // Optical path snapshot (LISTEN mode interest)
+    } else doc["file"] = false;
     if (optical_ && optical_->ready()) {
         doc["optical_dc"] = optical_->get_dc_level();
         doc["optical_p2p"] = optical_->get_signal_level();
         doc["signal"] = optical_->get_signal_level() >= DUCK_SIGNAL_THRESHOLD;
-    } else {
-        doc["signal"] = false;
-    }
-
-    String out;
-    serializeJson(doc, out);
+    } else doc["signal"] = false;
+    String out; serializeJson(doc, out);
     server_.send(200, "application/json", out);
 }
 
 void WebUI::handle_upload() {
     HTTPUpload& upload = server_.upload();
     if (upload.status == UPLOAD_FILE_START) {
-        upload_ok_ = false;
-        last_filename_ = upload.filename;
-        Serial.print(F("Upload start: "));
-        Serial.println(last_filename_);
+        upload_ok_ = false; last_filename_ = upload.filename;
+        Serial.print(F("Upload start: ")); Serial.println(last_filename_);
         if (playback_) playback_->stop();
         LittleFS.remove(DUCK_AUDIO_PATH);
         File f = LittleFS.open(DUCK_AUDIO_PATH, "w");
-        if (!f) {
-            Serial.println(F("Failed to open file for write"));
-            return;
-        }
+        if (!f) { Serial.println(F("Failed to open file for write")); return; }
         f.close();
     } else if (upload.status == UPLOAD_FILE_WRITE) {
-        if (upload.totalSize > DUCK_MAX_UPLOAD_BYTES) {
-            Serial.println(F("Upload too large"));
-            return;
-        }
+        if (upload.totalSize > DUCK_MAX_UPLOAD_BYTES) return;
         File f = LittleFS.open(DUCK_AUDIO_PATH, "a");
-        if (f) {
-            f.write(upload.buf, upload.currentSize);
-            f.close();
-        }
+        if (f) { f.write(upload.buf, upload.currentSize); f.close(); }
     } else if (upload.status == UPLOAD_FILE_END) {
-        Serial.print(F("Upload end, bytes="));
-        Serial.println(upload.totalSize);
+        Serial.print(F("Upload end, bytes=")); Serial.println(upload.totalSize);
         upload_ok_ = true;
     }
 }
@@ -309,98 +279,60 @@ void WebUI::handle_upload() {
 void WebUI::handle_upload_finish() {
     JsonDocument doc;
     if (!upload_ok_) {
-        doc["ok"] = false;
-        doc["error"] = "upload failed";
-        String out;
-        serializeJson(doc, out);
-        server_.send(400, "application/json", out);
-        return;
+        doc["ok"] = false; doc["error"] = "upload failed";
+        String out; serializeJson(doc, out);
+        server_.send(400, "application/json", out); return;
     }
-
     if (!playback_ || !playback_->load(LittleFS, DUCK_AUDIO_PATH)) {
-        doc["ok"] = false;
-        doc["error"] = "invalid WAV (need mono 8 kHz 16-bit PCM)";
+        doc["ok"] = false; doc["error"] = "invalid WAV (need mono 8 kHz 16-bit PCM)";
         LittleFS.remove(DUCK_AUDIO_PATH);
-        String out;
-        serializeJson(doc, out);
-        server_.send(400, "application/json", out);
-        return;
+        String out; serializeJson(doc, out);
+        server_.send(400, "application/json", out); return;
     }
-
-    doc["ok"] = true;
-    doc["filename"] = last_filename_;
+    doc["ok"] = true; doc["filename"] = last_filename_;
     doc["duration"] = playback_->duration_sec();
     doc["sample_rate"] = playback_->info().sample_rate;
-    String out;
-    serializeJson(doc, out);
+    String out; serializeJson(doc, out);
     server_.send(200, "application/json", out);
 }
 
 void WebUI::handle_play() {
-    if (mode_ == Mode::Clone && playback_) {
-        playback_->set_loop(loop_en_);
-        playback_->play();
-    }
+    if (mode_ == Mode::Clone && playback_) { playback_->set_loop(loop_en_); playback_->play(); }
     server_.send(200, "application/json", "{\"ok\":true}");
 }
-
 void WebUI::handle_stop() {
     if (playback_) playback_->stop();
     server_.send(200, "application/json", "{\"ok\":true}");
 }
-
 void WebUI::handle_laser() {
-    String body = server_.arg("plain");
-    body.toLowerCase();
+    String body = server_.arg("plain"); body.toLowerCase();
     bool on = (body.indexOf("on") >= 0);
     if (laser_) laser_->set_enabled(on);
-    // LISTEN passthrough only emits while laser is enabled
-    if (listen_ && mode_ == Mode::Listen) {
-        listen_->set_active(on);
-    }
+    if (listen_ && mode_ == Mode::Listen) listen_->set_active(on);
     server_.send(200, "application/json", on ? "{\"ok\":true,\"laser\":true}" : "{\"ok\":true,\"laser\":false}");
 }
-
 void WebUI::handle_gain() {
-    String body = server_.arg("plain");
-    float g = body.toFloat();
+    float g = server_.arg("plain").toFloat();
     if (laser_) laser_->set_gain(g);
     server_.send(200, "application/json", "{\"ok\":true}");
 }
-
 void WebUI::apply_mode(Mode m) {
     mode_ = m;
     if (m == Mode::Listen) {
         if (playback_) playback_->stop();
-        if (listen_) {
-            // Passthrough follows laser enable; arm engine so blocks flow when laser is on
-            listen_->set_active(laser_ && laser_->enabled());
-        }
-    } else {
-        if (listen_) listen_->set_active(false);
-    }
+        if (listen_) listen_->set_active(laser_ && laser_->enabled());
+    } else if (listen_) listen_->set_active(false);
 }
-
 void WebUI::handle_mode() {
-    String body = server_.arg("plain");
-    body.toLowerCase();
-    if (body.indexOf("listen") >= 0) {
-        apply_mode(Mode::Listen);
-    } else {
-        apply_mode(Mode::Clone);
-    }
+    String body = server_.arg("plain"); body.toLowerCase();
+    apply_mode(body.indexOf("listen") >= 0 ? Mode::Listen : Mode::Clone);
     server_.send(200, "application/json", "{\"ok\":true}");
 }
-
 void WebUI::handle_loop() {
-    String body = server_.arg("plain");
-    loop_en_ = (body.toInt() != 0);
+    loop_en_ = (server_.arg("plain").toInt() != 0);
     if (playback_) playback_->set_loop(loop_en_);
     server_.send(200, "application/json", "{\"ok\":true}");
 }
-
-void WebUI::handle_not_found() {
-    server_.send(404, "text/plain", "not found");
-}
+void WebUI::handle_not_found() { server_.send(404, "text/plain", "not found"); }
 
 } // namespace duckoustic
