@@ -10,25 +10,21 @@ Phone browser ── Wi-Fi SoftAP ── upload WAV / PLAY ── Laser PWM
 
 ---
 
-## Status: v0.2 — Browser Audio Upload + Optical Playback
+## Status: v0.2.1 — Browser upload + CLONE + LISTEN optical passthrough
 
-| Feature                    | v0.1 | v0.2 |
-|----------------------------|------|------|
-| ADC acquisition (BPW34)    | ✅   | ✅   |
-| Timer-driven sampling      | ✅   | ✅   |
-| Block statistics           | ✅   | ✅   |
-| Serial diagnostics         | ✅   | ✅   |
-| Wi-Fi SoftAP               | ❌   | ✅   |
-| Browser UI                 | ❌   | ✅   |
-| WAV upload (PCM 8 kHz)     | ❌   | ✅   |
-| PlaybackEngine → laser PWM | ❌   | ✅   |
-| Listen / Clone modes       | ❌   | ✅   |
-| MP3 / AAC decode           | ❌   | later |
-| Classic BT / A2DP          | ❌   | not planned (S3 has no Classic BT) |
-| BLE control                | ❌   | later (discovery / config only) |
+| Feature                         | Status |
+|---------------------------------|--------|
+| ADC acquisition (BPW34)         | ✅      |
+| Wi-Fi SoftAP + browser UI       | ✅      |
+| WAV upload (PCM 8 kHz mono 16)  | ✅      |
+| CLONE: file → LaserOutput       | ✅      |
+| LISTEN: BPW34 → LaserOutput     | ✅ v0.2.1 |
+| MP3 / AAC decode                | later  |
+| Classic BT / A2DP               | not on S3 |
+| BLE control                     | later  |
 
 **Why Wi-Fi first, not Bluetooth?**  
-ESP32-S3 has 2.4 GHz Wi-Fi and BLE, but **no Classic Bluetooth / A2DP**. BLE is awkward for arbitrary audio-file upload. SoftAP + browser gives:
+ESP32-S3 has 2.4 GHz Wi-Fi and BLE, but **no Classic Bluetooth / A2DP**. SoftAP + browser:
 
 > Power on → join `Duckoustic-XXXX` → open `http://192.168.4.1/` → choose WAV → PLAY.
 
@@ -41,27 +37,31 @@ No app. No pairing. No router.
 ```
                  PHONE
           Safari / Chrome
-                 │
+                 |
           Wi-Fi / SoftAP
-                 │
-                 ▼
+                 |
+                 v
           ESP32-S3 web UI
-                 │
-        ┌────────┐
-        │                 │
-    upload audio      controls
-        │          play / stop / loop
-        ▼
-   LittleFS (audio.wav)
-        │
-        ▼
-   PlaybackEngine  ──►  LaserOutput (PWM)
-                              │
-                              ▼
-                         optical path
-                              │
-                              ▼
-                           BPW34 → ADC   (LISTEN telemetry)
+                 |
+        +--------+--------+
+        |                 |
+    CLONE              LISTEN
+        |                 |
+   WAV / LittleFS    BPW34 → ADC
+        |                 |
+        v                 v
+   PlaybackEngine    ListenEngine
+        |                 |
+        +--------+--------+
+                 |
+                 v
+           LaserOutput (PWM)
+                 |
+                 v
+            optical field
+                 |
+                 v
+              BPW34 (again)
 ```
 
 Firmware layers (intentionally decoupled):
@@ -69,92 +69,76 @@ Firmware layers (intentionally decoupled):
 ```
 web/          SoftAP, HTTP, upload, status, control
 audio/        WavReader, PlaybackEngine
+listen/       ListenEngine (live optical passthrough)
 optical/      LaserOutput (modulation + safety limits)
-input/        OpticalInput (BPW34 ADC) — unchanged from v0.1
+input/        OpticalInput (BPW34 ADC)
 telemetry/    serial diagnostics
 ```
 
-`PlaybackEngine` does **not** know about Wi-Fi. Later it can be fed from live ADC, BLE chunks, or a learned clone representation without touching the web layer.
+`PlaybackEngine` and `ListenEngine` do **not** know about Wi-Fi. They share one `LaserOutput`; mode switch is exclusive.
 
 ### Modes
 
-| Mode   | Source                         | Output              |
-|--------|--------------------------------|---------------------|
-| LISTEN | BPW34 → ADC (live)             | telemetry only*     |
-| CLONE  | uploaded WAV → PlaybackEngine  | LaserOutput (PWM)   |
+| Mode   | Source                         | Output                          |
+|--------|--------------------------------|---------------------------------|
+| LISTEN | BPW34 → ADC (live)             | LaserOutput (PWM) passthrough   |
+| CLONE  | uploaded WAV → PlaybackEngine  | LaserOutput (PWM)               |
 
-\* Future: LISTEN can drive the same `LaserOutput` for a true optical passthrough / feedback experiment.
+**LISTEN passthrough:** when mode is Listen and laser is ON, each acquired ADC block is DC-removed, scaled by `DUCK_LISTEN_SCALE`, and streamed to the same `LaserOutput` used by Clone. That closes the optical loop for feedback experiments (vibrate target → measure → re-modulate laser → observe again).
+
+Tune sensitivity with `DUCK_LISTEN_SCALE` (default 512 ADC counts → full scale). Smaller = more sensitive. Gain slider still applies.
 
 ---
 
 ## Hardware
 
-### Input path (v0.1, still active)
+### Input path
 
 ```
-laser (external power / external enable)
-    ↓
+laser (or ambient optical field)
+    |
 reflective / vibrating target
-    ↓
+    |
 BPW34 photodiode
-    ↓
-analog front-end (e.g. XH-A901 / NE5532 stage)
-    ↓
+    |
+analog front-end (e.g. XH-A901 / NE5532)
+    |
 ESP32-S3 ADC  (default GPIO4)
 ```
 
-### Output path (v0.2)
+### Output path
 
 ```
-PlaybackEngine PCM
-    ↓
+PlaybackEngine or ListenEngine
+    |
 LaserOutput  (PWM, default GPIO5)
-    ↓
+    |
 laser modulator / driver transistor
-    ↓
+    |
 optical field  →  (optional) BPW34 again for closed-loop experiments
-```
-
-Optional acoustic monitoring (not required for v0.2 firmware):
-
-```
-AFE tap → XH-A901 → PAM8403 → speaker
 ```
 
 ### Safety
 
 - Laser enable is software-gated (`LaserOutput::set_enabled`).
 - PWM duty is hard-capped by `DUCK_LASER_MAX_DUTY` (default 85 %).
-- Firmware never assumes the laser is eye-safe; treat the optical path as a Class-appropriate laser system under your control.
+- LISTEN only emits while laser is ON (no accidental optical loop with laser disabled).
 
 ---
 
 ## Quick start
 
-### Requirements
-
-- PlatformIO
-- ESP32-S3 board (`esp32-s3-devkitc-1` or compatible)
-- BPW34 + AFE on `DUCK_ADC_PIN` (default GPIO4)
-- Laser modulator on `DUCK_LASER_PWM_PIN` (default GPIO5)
-
-### Build & flash
-
 ```bash
 pio run -t upload
-pio run -t uploadfs   # only if you later add data/ assets; UI is embedded
 pio device monitor
 ```
 
-### Phone workflow
+1. Join Wi-Fi **`Duckoustic-XXXX`**
+2. Open **http://192.168.4.1/**
+3. **Clone:** upload mono 8 kHz 16-bit PCM WAV → PLAY
+4. **Listen:** select Listen (passthrough) → enable Laser → optical AC drives the laser
 
-1. Power the board.
-2. Join Wi-Fi network **`Duckoustic-XXXX`** (XXXX = last 4 hex of MAC). Open network by default.
-3. Open **http://192.168.4.1/**
-4. Choose a **mono 8 kHz 16-bit PCM WAV**.
-5. PLAY. Toggle laser, gain, Listen / Clone as needed.
-
-### WAV contract (v0.2)
+### WAV contract (CLONE)
 
 | Parameter     | Required        |
 |---------------|-----------------|
@@ -164,13 +148,9 @@ pio device monitor
 | Sample rate   | 8000 Hz         |
 | Bits          | 16 signed LE    |
 
-Other rates / codecs can be added later behind a decoder → PCM stage; the playback engine stays the same.
-
 ---
 
-## Configuration
-
-All tunables: `include/config.h`
+## Configuration (`include/config.h`)
 
 | Macro | Default | Meaning |
 |-------|---------|---------|
@@ -178,56 +158,19 @@ All tunables: `include/config.h`
 | `DUCK_SAMPLE_RATE_HZ` | 8000 | Acquisition rate |
 | `DUCK_LASER_PWM_PIN` | 5 | Laser modulator PWM |
 | `DUCK_LASER_MAX_DUTY` | 0.85 | Safety duty ceiling |
-| `DUCK_AP_SSID_PREFIX` | `Duckoustic-` | SoftAP name prefix |
-| `DUCK_AP_PASSWORD` | `""` | Empty = open |
-| `DUCK_AUDIO_PATH` | `/audio.wav` | LittleFS path |
-| `DUCK_MAX_UPLOAD_BYTES` | 1 MiB | Upload size limit |
+| `DUCK_LISTEN_SCALE` | 512 | ADC counts → full-scale in LISTEN |
 | `DUCK_DEFAULT_GAIN` | 0.6 | Initial laser gain |
+| `DUCK_AP_SSID_PREFIX` | `Duckoustic-` | SoftAP name prefix |
 
 ---
 
-## Serial banner (expected)
+## LISTEN experiment notes
 
-```
-DUCKOUSTIC v0.2
-BPW34 INPUT: READY
-LASER OUTPUT: PWM
-TRANSPORT: Wi-Fi SoftAP + browser
-TARGET: optical vibration + clone playback
-
-SoftAP SSID: Duckoustic-A1B2
-SoftAP IP:   192.168.4.1
-HTTP server on http://192.168.4.1/
-ADC pin GPIO4  sample_rate=8000 Hz  block=256 samples
-Laser PWM pin GPIO5
-Ready — connect phone to SoftAP, open http://192.168.4.1/
-```
-
----
-
-## Acceptance criteria (v0.2)
-
-- [x] SoftAP comes up as `Duckoustic-XXXX` at 192.168.4.1
-- [x] Browser UI loads with no external CDN
-- [x] Valid mono 8 kHz 16-bit WAV uploads to LittleFS
-- [x] Invalid WAV is rejected with a clear JSON error
-- [x] PLAY drives `LaserOutput` PWM at sample rate
-- [x] STOP idles the laser output
-- [x] Gain and laser enable are controllable from the UI
-- [x] Listen / Clone mode switch exists (Clone uses file; Listen keeps ADC path)
-- [x] v0.1 optical acquisition + serial telemetry still run
-- [x] `PlaybackEngine` has no Wi-Fi includes
-
-**Definition of done:** *Phone → browser → WAV → optical clone.*
-
----
-
-## Roadmap notes
-
-- **MP3/AAC**: decode → PCM → same `PlaybackEngine`.
-- **BLE**: discovery, provisioning, small control messages — not primary audio transport.
-- **Clone feedback**: LISTEN optical signal → estimate transfer function → compensated CLONE output.
-- **Speaker path**: optional DAC/I2S → PAM8403 for acoustic monitoring of the same buffer.
+1. Start with **laser OFF**, mode **Listen** — confirm serial shows optical signal when you vibrate the target.
+2. Enable laser at **low gain**.
+3. Status line should show **PASSTHROUGH**.
+4. If the loop runs away (optical howl), lower gain or increase `DUCK_LISTEN_SCALE`.
+5. Next milestone: estimate transfer function while listening, then compensate in Clone.
 
 ---
 
