@@ -36,7 +36,7 @@ SignalProcessor  processor;
 Telemetry        telemetry;
 LaserOutput      laser;
 PlaybackEngine   playback;
-ListenEngine     listen;
+ListenEngine     listen_eng;  // not "listen" — clashes with POSIX listen()
 WebUI            web;
 
 void setup() {
@@ -53,9 +53,9 @@ void setup() {
     }
 
     playback.begin(&laser);
-    listen.begin(&laser);
+    listen_eng.begin(&laser);
 
-    if (!web.begin(&playback, &laser, &optical, &processor, &listen)) {
+    if (!web.begin(&playback, &laser, &optical, &processor, &listen_eng)) {
         Serial.println(F("FATAL: HTTPS server initialization failed"));
         while (true) delay(1000);
     }
@@ -87,14 +87,14 @@ void loop() {
         telemetry.update(stats, optical.get_sample_rate());
 
         if (web.mode() == WebUI::Mode::Listen) {
-            listen.on_block(optical);
+            listen_eng.on_block(optical);
         }
     }
 
     if (web.mode() == WebUI::Mode::Clone) {
         playback.tick();
     } else {
-        listen.tick();
+        listen_eng.tick();
     }
 
     delay(0);
