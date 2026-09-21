@@ -16,19 +16,12 @@ namespace duckoustic {
 
 /**
  * SoftAP + HTTPS browser UI (TLS on TCP 443).
- *
  * Primary:  https://192.168.4.1/
- * Secondary: https://duckoustic.local/  (mDNS)
+ * Secondary: https://duckoustic.local/
  *
- * Endpoints:
- *   GET  /           → HTML UI
- *   GET  /api/status → JSON status
- *   GET  /api/network→ SoftAP / TLS diagnostics
- *   POST /api/upload → multipart WAV upload
- *   POST /api/play | /stop | /laser | /gain | /mode | /loop
- *
- * Self-signed device cert (SAN IP:192.168.4.1 + DNS:duckoustic.local).
- * No WiFiManager, no external router, no Internet required.
+ * Modes via POST /api/mode body:
+ *   clone | listen | stereo
+ * stereo = Listen + OpticalChannelMode::Stereo (GPIO4 L, GPIO7 R).
  */
 class WebUI {
 public:
@@ -69,6 +62,7 @@ private:
     OpticalInput*    optical_   = nullptr;
     SignalProcessor* processor_ = nullptr;
     Mode             mode_      = Mode::Clone;
+    bool             optical_stereo_ = false;
     bool             loop_en_   = false;
     String           last_filename_;
     bool             upload_ok_ = false;
