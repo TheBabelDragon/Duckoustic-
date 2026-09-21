@@ -1,25 +1,13 @@
 /**
- * Duckoustic v0.2
+ * Duckoustic v0.2.1
  *
  * Browser-first optical microphone / optical audio player.
  *
- * Architecture:
+ *   LISTEN  BPW34 → ADC → ListenEngine → LaserOutput  (live optical passthrough)
+ *   CLONE   WAV file   → PlaybackEngine → LaserOutput
  *
- *   PHONE (Safari / Chrome)
- *          |
- *     Wi-Fi SoftAP
- *          |
- *   ESP32-S3 Web UI  -- upload WAV / play / stop / laser / gain / mode
- *          |
- *     +----+----+
- *     |         |
- *  LISTEN     CLONE
- *     |         |
- *  BPW34 ->   PlaybackEngine -> LaserOutput (PWM)
- *  OpticalInput
- *
- * PlaybackEngine does not know about Wi-Fi.
- * OpticalInput path from v0.1 is preserved unchanged.
+ * Both modes share the same LaserOutput. Mode switch is exclusive.
+ * PlaybackEngine / ListenEngine do not know about Wi-Fi.
  */
 
 #include <Arduino.h>
@@ -29,6 +17,7 @@
 #include "telemetry.h"
 #include "laser_output.h"
 #include "playback_engine.h"
+#include "listen_engine.h"
 #include "web_ui.h"
 
 using namespace duckoustic;
@@ -38,6 +27,7 @@ SignalProcessor  processor;
 Telemetry        telemetry;
 LaserOutput      laser;
 PlaybackEngine   playback;
+ListenEngine     listen;
 WebUI            web;
 
 void setup() {
@@ -50,12 +40,13 @@ void setup() {
     }
 
     if (!laser.begin()) {
-        Serial.println(F("WARN: LaserOutput init failed — optical playback disabled"));
+        Serial.println(F("WARN: LaserOutput init failed — optical output disabled"));
     }
 
     playback.begin(&laser);
+    listen.begin(&laser);
 
-    if (!web.begin(&playback, &laser, &optical, &processor)) {
+    if (!web.begin(&playback, &laser, &optical, &processor, &listen)) {
         Serial.println(F("FATAL: WebUI / SoftAP init failed"));
         while (true) delay(1000);
     }
@@ -69,25 +60,29 @@ void setup() {
     Serial.println(F(" samples"));
     Serial.print(F("Laser PWM pin GPIO"));
     Serial.println(DUCK_LASER_PWM_PIN);
+    Serial.println(F("LISTEN: optical passthrough armed when mode=listen + laser ON"));
     Serial.println(F("Ready — connect phone to SoftAP, open http://192.168.4.1/"));
     Serial.println();
 }
 
 void loop() {
-    // HTTP
     web.handle();
 
-    // Optical acquisition (always running; useful telemetry in both modes)
+    // Always acquire; telemetry + LISTEN both need blocks
     if (optical.sample()) {
         BlockStats stats = processor.process(optical);
         telemetry.update(stats, optical.get_sample_rate());
+
+        if (web.mode() == WebUI::Mode::Listen) {
+            listen.on_block(optical);
+        }
     }
 
-    // Clone-mode playback (sample-accurate when loop is tight enough)
     if (web.mode() == WebUI::Mode::Clone) {
         playback.tick();
+    } else {
+        listen.tick();
     }
 
-    // Short yield — keep HTTP + playback responsive
     delay(0);
 }

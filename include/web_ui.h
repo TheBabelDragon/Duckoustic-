@@ -6,6 +6,7 @@
 #include <LittleFS.h>
 #include "config.h"
 #include "playback_engine.h"
+#include "listen_engine.h"
 #include "laser_output.h"
 #include "optical_input.h"
 #include "signal_processor.h"
@@ -19,7 +20,7 @@ namespace duckoustic {
  *   GET  /           → HTML UI
  *   GET  /api/status → JSON status
  *   POST /api/upload → multipart WAV upload
- *   POST /api/play   → start playback
+ *   POST /api/play   → start playback (CLONE)
  *   POST /api/stop   → stop playback
  *   POST /api/laser  → body: on|off
  *   POST /api/gain   → body: 0.0–1.0
@@ -31,7 +32,8 @@ public:
     WebUI() : server_(80) {}
 
     bool begin(PlaybackEngine* playback, LaserOutput* laser,
-               OpticalInput* optical, SignalProcessor* processor);
+               OpticalInput* optical, SignalProcessor* processor,
+               ListenEngine* listen);
 
     /** Call from loop() — handles HTTP clients. */
     void handle();
@@ -43,6 +45,7 @@ private:
     void setup_routes();
     void start_softap();
     String make_ssid() const;
+    void apply_mode(Mode m);
 
     void handle_root();
     void handle_status();
@@ -58,6 +61,7 @@ private:
 
     WebServer        server_;
     PlaybackEngine*  playback_  = nullptr;
+    ListenEngine*    listen_    = nullptr;
     LaserOutput*     laser_     = nullptr;
     OpticalInput*    optical_   = nullptr;
     SignalProcessor* processor_ = nullptr;
