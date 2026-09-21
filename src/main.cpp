@@ -1,12 +1,20 @@
 /**
- * Duckoustic v0.2.1
+ * Duckoustic v0.2.2
  *
- * Browser-first optical microphone / optical audio player.
+ * Browser-first optical microphone / dual-channel audio output.
  *
- *   LISTEN  BPW34 → ADC → ListenEngine → LaserOutput  (live optical passthrough)
- *   CLONE   WAV file   → PlaybackEngine → LaserOutput
+ *   BPW34 → GPIO4 ADC  →  ListenEngine / telemetry
+ *   WAV   → PlaybackEngine
+ *              ↓
+ *        LaserOutput (stereo PWM)
+ *              ↓
+ *   GPIO5 → PAM8403 IN-L     GPIO6 → PAM8403 IN-R
+ *              ↓                      ↓
+ *        PAM power stage (L+/L-, R+/R- — not driven by GPIO)
  *
- * Both modes share the same LaserOutput. Mode switch is exclusive.
+ *   LISTEN  BPW34 → ADC → ListenEngine → dual mono on GPIO5+GPIO6
+ *   CLONE   WAV file    → PlaybackEngine → dual mono on GPIO5+GPIO6
+ *
  * PlaybackEngine / ListenEngine do not know about Wi-Fi.
  */
 
@@ -40,7 +48,7 @@ void setup() {
     }
 
     if (!laser.begin()) {
-        Serial.println(F("WARN: LaserOutput init failed — optical output disabled"));
+        Serial.println(F("WARN: Audio PWM output init failed"));
     }
 
     playback.begin(&laser);
@@ -51,16 +59,20 @@ void setup() {
         while (true) delay(1000);
     }
 
-    Serial.print(F("ADC pin GPIO"));
-    Serial.print(DUCK_ADC_PIN);
-    Serial.print(F("  sample_rate="));
-    Serial.print(optical.get_sample_rate());
-    Serial.print(F(" Hz  block="));
-    Serial.print(optical.block_size());
-    Serial.println(F(" samples"));
-    Serial.print(F("Laser PWM pin GPIO"));
-    Serial.println(DUCK_LASER_PWM_PIN);
-    Serial.println(F("LISTEN: optical passthrough armed when mode=listen + laser ON"));
+    Serial.print(F("ADC input:        GPIO"));
+    Serial.println(DUCK_ADC_PIN);
+    Serial.print(F("Audio L PWM:      GPIO"));
+    Serial.println(DUCK_AUDIO_LEFT_PWM_PIN);
+    Serial.print(F("Audio R PWM:      GPIO"));
+    Serial.println(DUCK_AUDIO_RIGHT_PWM_PIN);
+    Serial.print(F("PWM carrier:      "));
+    Serial.print(DUCK_AUDIO_PWM_FREQ_HZ);
+    Serial.println(F(" Hz"));
+    Serial.print(F("Audio sample rate: "));
+    Serial.print(DUCK_SAMPLE_RATE_HZ);
+    Serial.println(F(" Hz"));
+    Serial.println(F("Boundary: GPIO5/6 → PAM IN-L/IN-R (not speaker terminals)"));
+    Serial.println(F("LISTEN: optical passthrough when mode=listen + laser ON"));
     Serial.println(F("Ready — connect phone to SoftAP, open http://192.168.4.1/"));
     Serial.println();
 }
