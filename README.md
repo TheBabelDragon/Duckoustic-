@@ -1,34 +1,28 @@
 # Duckoustic
 
-**ESP32-S3 optical microphone + optical audio player**
+**ESP32-S3 optical microphone + dual-channel audio output**
 
 ```
-Laser → vibrating reflective target → BPW34 → AFE → ESP32-S3 ADC
-                                                      ↕
-Phone browser ── Wi-Fi SoftAP ── upload WAV / PLAY ── Laser PWM
+BPW34 → GPIO4 ADC → Listen / Clone DSP
+                    ↓
+            LaserOutput (stereo PWM)
+                    ↓
+        GPIO5 → PAM IN-L    GPIO6 → PAM IN-R
 ```
 
 ---
 
-## Status: v0.2.1 — Browser upload + CLONE + LISTEN optical passthrough
+## Status: v0.2.2 — Stereo PAM audio outputs (GPIO5 L / GPIO6 R) + CLONE + LISTEN
 
 | Feature                         | Status |
 |---------------------------------|--------|
-| ADC acquisition (BPW34)         | ✅      |
+| ADC acquisition (BPW34, GPIO4)  | ✅      |
 | Wi-Fi SoftAP + browser UI       | ✅      |
 | WAV upload (PCM 8 kHz mono 16)  | ✅      |
-| CLONE: file → LaserOutput       | ✅      |
-| LISTEN: BPW34 → LaserOutput     | ✅ v0.2.1 |
+| CLONE: file → dual mono L+R     | ✅      |
+| LISTEN: BPW34 → dual mono L+R   | ✅      |
+| Stereo WAV / independent L/R    | later  |
 | MP3 / AAC decode                | later  |
-| Classic BT / A2DP               | not on S3 |
-| BLE control                     | later  |
-
-**Why Wi-Fi first, not Bluetooth?**  
-ESP32-S3 has 2.4 GHz Wi-Fi and BLE, but **no Classic Bluetooth / A2DP**. SoftAP + browser:
-
-> Power on → join `Duckoustic-XXXX` → open `http://192.168.4.1/` → choose WAV → PLAY.
-
-No app. No pairing. No router.
 
 ---
 
@@ -47,7 +41,7 @@ No app. No pairing. No router.
         |                 |
     CLONE              LISTEN
         |                 |
-   WAV / LittleFS    BPW34 → ADC
+   WAV / LittleFS    BPW34 → GPIO4 ADC
         |                 |
         v                 v
    PlaybackEngine    ListenEngine
@@ -55,38 +49,25 @@ No app. No pairing. No router.
         +--------+--------+
                  |
                  v
-           LaserOutput (PWM)
+      LaserOutput::write()  (mono → L=R)
                  |
-                 v
-            optical field
-                 |
-                 v
-              BPW34 (again)
+        +--------+--------+
+        |                 |
+   GPIO5 PWM         GPIO6 PWM
+   PAM IN-L          PAM IN-R
+        |                 |
+        +-------- PAM power stage --------+
+                 L+/L-          R+/R-
 ```
-
-Firmware layers (intentionally decoupled):
-
-```
-web/          SoftAP, HTTP, upload, status, control
-audio/        WavReader, PlaybackEngine
-listen/       ListenEngine (live optical passthrough)
-optical/      LaserOutput (modulation + safety limits)
-input/        OpticalInput (BPW34 ADC)
-telemetry/    serial diagnostics
-```
-
-`PlaybackEngine` and `ListenEngine` do **not** know about Wi-Fi. They share one `LaserOutput`; mode switch is exclusive.
 
 ### Modes
 
 | Mode   | Source                         | Output                          |
 |--------|--------------------------------|---------------------------------|
-| LISTEN | BPW34 → ADC (live)             | LaserOutput (PWM) passthrough   |
-| CLONE  | uploaded WAV → PlaybackEngine  | LaserOutput (PWM)               |
+| LISTEN | BPW34 → ADC (live)             | dual mono → GPIO5 L + GPIO6 R   |
+| CLONE  | uploaded WAV → PlaybackEngine  | dual mono → GPIO5 L + GPIO6 R   |
 
-**LISTEN passthrough:** when mode is Listen and laser is ON, each acquired ADC block is DC-removed, scaled by `DUCK_LISTEN_SCALE`, and streamed to the same `LaserOutput` used by Clone. That closes the optical loop for feedback experiments (vibrate target → measure → re-modulate laser → observe again).
-
-Tune sensitivity with `DUCK_LISTEN_SCALE` (default 512 ADC counts → full scale). Smaller = more sensitive. Gain slider still applies.
+`write(float)` keeps the mono pipeline; both PAM inputs get the same sample. `write_stereo(L,R)` is available for future independent channels.
 
 ---
 
@@ -95,58 +76,55 @@ Tune sensitivity with `DUCK_LISTEN_SCALE` (default 512 ADC counts → full scale
 ### Input path
 
 ```
-laser (or ambient optical field)
-    |
-reflective / vibrating target
-    |
-BPW34 photodiode
-    |
-analog front-end (e.g. XH-A901 / NE5532)
-    |
-ESP32-S3 ADC  (default GPIO4)
+optical field → BPW34 → AFE → ESP32 GPIO4 (ADC)
 ```
 
-### Output path
+### Output path (stereo PAM **input** stage)
 
 ```
-PlaybackEngine or ListenEngine
-    |
-LaserOutput  (PWM, default GPIO5)
-    |
-laser modulator / driver transistor
-    |
-optical field  →  (optional) BPW34 again for closed-loop experiments
+LaserOutput PWM
+    +-- GPIO5 → PAM8403 IN-L
+    +-- GPIO6 → PAM8403 IN-R
+              |
+         PAM power stage
+              |
+         L+/L-  R+/R-  → external load / modulator
 ```
 
-### Safety
+### Electrical boundary
 
-- Laser enable is software-gated (`LaserOutput::set_enabled`).
-- PWM duty is hard-capped by `DUCK_LASER_MAX_DUTY` (default 85 %).
-- LISTEN only emits while laser is ON (no accidental optical loop with laser disabled).
+| Connection | Correct |
+|------------|---------|
+| ESP32 GPIO5 | → PAM8403 **IN-L** |
+| ESP32 GPIO6 | → PAM8403 **IN-R** |
+| ESP32 GND | → PAM8403 signal **GND** |
+| GPIO5 / GPIO6 | **Must not** connect to PAM L+/L- or R+/R- |
+| PAM L+/L-, R+/R- | Differential **power** outputs only |
+
+GPIO5/6 are **PWM audio-source** signals, not a conventional DAC. An RC reconstruction / low-pass filter between each GPIO and the PAM input is recommended.
+
+PWM carrier: **80 kHz**. Audio sample rate: **8 kHz** (optical ADC / Listen compatible).
 
 ---
 
 ## Quick start
 
 ```bash
+git pull
 pio run -t upload
 pio device monitor
 ```
 
-1. Join Wi-Fi **`Duckoustic-XXXX`**
-2. Open **http://192.168.4.1/**
-3. **Clone:** upload mono 8 kHz 16-bit PCM WAV → PLAY
-4. **Listen:** select Listen (passthrough) → enable Laser → optical AC drives the laser
+Expected serial lines:
 
-### WAV contract (CLONE)
-
-| Parameter     | Required        |
-|---------------|-----------------|
-| Container     | RIFF WAVE       |
-| Format        | PCM (format 1)  |
-| Channels      | 1 (mono)        |
-| Sample rate   | 8000 Hz         |
-| Bits          | 16 signed LE    |
+```
+ADC input:        GPIO4
+Audio L PWM:      GPIO5
+Audio R PWM:      GPIO6
+PWM carrier:      80000 Hz
+Audio sample rate: 8000 Hz
+Boundary: GPIO5/6 → PAM IN-L/IN-R (not speaker terminals)
+```
 
 ---
 
@@ -154,23 +132,14 @@ pio device monitor
 
 | Macro | Default | Meaning |
 |-------|---------|---------|
-| `DUCK_ADC_PIN` | 4 | BPW34 AFE → ADC |
-| `DUCK_SAMPLE_RATE_HZ` | 8000 | Acquisition rate |
-| `DUCK_LASER_PWM_PIN` | 5 | Laser modulator PWM |
-| `DUCK_LASER_MAX_DUTY` | 0.85 | Safety duty ceiling |
-| `DUCK_LISTEN_SCALE` | 512 | ADC counts → full-scale in LISTEN |
-| `DUCK_DEFAULT_GAIN` | 0.6 | Initial laser gain |
-| `DUCK_AP_SSID_PREFIX` | `Duckoustic-` | SoftAP name prefix |
-
----
-
-## LISTEN experiment notes
-
-1. Start with **laser OFF**, mode **Listen** — confirm serial shows optical signal when you vibrate the target.
-2. Enable laser at **low gain**.
-3. Status line should show **PASSTHROUGH**.
-4. If the loop runs away (optical howl), lower gain or increase `DUCK_LISTEN_SCALE`.
-5. Next milestone: estimate transfer function while listening, then compensate in Clone.
+| `DUCK_ADC_PIN` | 4 | BPW34 → ADC |
+| `DUCK_AUDIO_LEFT_PWM_PIN` | 5 | PAM IN-L |
+| `DUCK_AUDIO_RIGHT_PWM_PIN` | 6 | PAM IN-R |
+| `DUCK_AUDIO_PWM_FREQ_HZ` | 80000 | PWM carrier |
+| `DUCK_AUDIO_PWM_RES_BITS` | 10 | Duty resolution |
+| `DUCK_SAMPLE_RATE_HZ` | 8000 | Audio / ADC rate |
+| `DUCK_LISTEN_SCALE` | 512 | LISTEN sensitivity |
+| `DUCK_AUDIO_MAX_DUTY` | 0.85 | Per-channel safety |
 
 ---
 
