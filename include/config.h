@@ -122,6 +122,12 @@ namespace duckoustic {
 #define DUCK_PLAYBACK_BUF_SAMPLES  512
 #endif
 
+// LISTEN passthrough: ADC counts (post-DC) that map to full-scale ±1.0
+// Smaller → more sensitive. ~512 ≈ strong modulation from modest optical AC.
+#ifndef DUCK_LISTEN_SCALE
+#define DUCK_LISTEN_SCALE       512
+#endif
+
 // Default linear gain applied to PCM before laser modulation (0.0–1.0)
 #ifndef DUCK_DEFAULT_GAIN
 #define DUCK_DEFAULT_GAIN       0.6f

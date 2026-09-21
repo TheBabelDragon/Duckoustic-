@@ -9,11 +9,12 @@ void Telemetry::begin() {
 
 void Telemetry::print_banner() {
     Serial.println();
-    Serial.println(F("DUCKOUSTIC v0.2"));
+    Serial.println(F("DUCKOUSTIC v0.2.1"));
     Serial.println(F("BPW34 INPUT: READY"));
     Serial.println(F("LASER OUTPUT: PWM"));
     Serial.println(F("TRANSPORT: Wi-Fi SoftAP + browser"));
-    Serial.println(F("TARGET: optical vibration + clone playback"));
+    Serial.println(F("TARGET: optical vibration + clone + listen passthrough"));
+    Serial.println(F("LISTEN: BPW34 → LaserOutput when mode=listen + laser ON"));
     Serial.println();
 }
 
