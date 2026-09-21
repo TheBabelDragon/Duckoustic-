@@ -4,7 +4,6 @@
 #include "certs/duckoustic_key.h"
 
 namespace {
-
 bool decode_b64(const char* in, uint8_t* out, size_t out_cap, size_t* out_len) {
     static const int8_t T[128] = {
         -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
@@ -16,27 +15,18 @@ bool decode_b64(const char* in, uint8_t* out, size_t out_cap, size_t* out_len) {
         -1,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,
         41,42,43,44,45,46,47,48,49,50,51,-1,-1,-1,-1,-1
     };
-    size_t n = 0;
-    uint32_t buf = 0;
-    int bits = 0;
+    size_t n = 0; uint32_t buf = 0; int bits = 0;
     for (const char* p = in; *p; ++p) {
         unsigned char c = (unsigned char)*p;
         if (c == '=' || c == '\n' || c == '\r' || c == ' ') continue;
         if (c >= 128) continue;
-        int8_t v = T[c];
-        if (v < 0) continue;
-        buf = (buf << 6) | (uint32_t)v;
-        bits += 6;
-        if (bits >= 8) {
-            bits -= 8;
-            if (n >= out_cap) return false;
-            out[n++] = (uint8_t)((buf >> bits) & 0xFF);
-        }
+        int8_t v = T[c]; if (v < 0) continue;
+        buf = (buf << 6) | (uint32_t)v; bits += 6;
+        if (bits >= 8) { bits -= 8; if (n >= out_cap) return false;
+            out[n++] = (uint8_t)((buf >> bits) & 0xFF); }
     }
-    *out_len = n;
-    return n > 0;
+    *out_len = n; return n > 0;
 }
-
 } // namespace
 
 namespace duckoustic {
@@ -65,8 +55,8 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(
   .meta { font-size:.85rem; color:var(--muted); line-height:1.45; margin-top:.5rem; }
   .meta b { color:var(--fg); font-weight:500; }
   .status { font-size:.8rem; color:var(--muted); text-align:center; margin-top:.5rem; }
-  .modes { display:flex; gap:.5rem; }
-  .modes label { flex:1; display:flex; align-items:center; gap:.4rem; padding:.55rem .7rem; background:#21262d; border-radius:8px; border:1px solid var(--border); cursor:pointer; text-transform:none; font-size:.9rem; color:var(--fg); letter-spacing:0; }
+  .modes { display:flex; gap:.5rem; flex-wrap:wrap; }
+  .modes label { flex:1; min-width:90px; display:flex; align-items:center; gap:.4rem; padding:.55rem .7rem; background:#21262d; border-radius:8px; border:1px solid var(--border); cursor:pointer; text-transform:none; font-size:.85rem; color:var(--fg); letter-spacing:0; }
   .bar { height:6px; background:#21262d; border-radius:3px; overflow:hidden; margin-top:.5rem; }
   .bar > i { display:block; height:100%; width:0; background:var(--acc); transition:width .2s; }
 </style>
@@ -94,9 +84,11 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(
   <div class="card">
     <label>Mode</label>
     <div class="modes">
-      <label><input type="radio" name="mode" value="listen"> Listen (passthrough)</label>
+      <label><input type="radio" name="mode" value="listen"> Listen mono</label>
+      <label><input type="radio" name="mode" value="stereo"> Listen stereo</label>
       <label><input type="radio" name="mode" value="clone" checked> Clone (file)</label>
     </div>
+    <div class="meta" id="optmeta" style="margin-top:.6rem">Optical Input<br>L: GPIO4 · R: GPIO7 · Mode: —</div>
   </div>
   <div class="status" id="status">connecting…</div>
 </div>
@@ -120,7 +112,16 @@ async function refresh() {
       'Format: WAV · ' + s.sample_rate + ' Hz · ' + s.channels + ' ch · ' + s.bits + '-bit<br>' +
       'Duration: <b>' + (s.duration || 0).toFixed(2) + ' s</b> · state: ' + s.play_state;
   }
-  document.querySelectorAll('input[name=mode]').forEach(r => { r.checked = (r.value === s.mode); });
+  const om = (s.optical && s.optical.mode) ? s.optical.mode : 'mono';
+  const uiMode = (s.mode === 'listen') ? (om === 'stereo' ? 'stereo' : 'listen') : 'clone';
+  document.querySelectorAll('input[name=mode]').forEach(r => { r.checked = (r.value === uiMode); });
+  const omEl = $('optmeta');
+  if (omEl && s.optical) {
+    omEl.innerHTML = 'Optical Input<br>L: GPIO' + (s.optical.left_pin||4) +
+      ' · R: GPIO' + (s.optical.right_pin||7) +
+      ' · Mode: ' + (om === 'stereo' ? 'Stereo' : 'Mono') +
+      '<br>ADC L: <b>' + (s.optical.left_adc||0) + '</b> · R: <b>' + (s.optical.right_adc||0) + '</b>';
+  }
   let extra = '';
   if (s.mode === 'listen') extra = s.listen_active ? ' · PASSTHROUGH' : ' · passthrough armed (enable laser)';
   statusEl.textContent = 'AP ' + (s.ssid || '') + ' · clients ' + (s.clients || 0) +
@@ -154,39 +155,21 @@ refresh(); setInterval(refresh, 1500);
 bool WebUI::begin(PlaybackEngine* playback, LaserOutput* laser,
                   OpticalInput* optical, SignalProcessor* processor,
                   ListenEngine* listen) {
-    playback_ = playback;
-    laser_    = laser;
-    optical_  = optical;
-    processor_ = processor;
-    listen_   = listen;
-    tls_ok_   = false;
-
-    if (!LittleFS.begin(true)) {
-        Serial.println(F("LittleFS mount failed"));
-        return false;
-    }
-
-    if (!start_softap()) {
-        Serial.println(F("ERROR: SoftAP failed to start"));
-        return false;
-    }
-
-    static uint8_t cert_der[2048];
-    static uint8_t key_der[2048];
+    playback_ = playback; laser_ = laser; optical_ = optical;
+    processor_ = processor; listen_ = listen; tls_ok_ = false;
+    if (!LittleFS.begin(true)) { Serial.println(F("LittleFS mount failed")); return false; }
+    if (!start_softap()) { Serial.println(F("ERROR: SoftAP failed to start")); return false; }
+    static uint8_t cert_der[2048]; static uint8_t key_der[2048];
     size_t cert_len = 0, key_len = 0;
     if (!decode_b64(duckoustic_cert_b64, cert_der, sizeof(cert_der), &cert_len) ||
         !decode_b64(duckoustic_key_b64, key_der, sizeof(key_der), &key_len) ||
         cert_len == 0 || key_len == 0) {
-        Serial.println(F("ERROR: TLS certificate/key load failed"));
-        return false;
+        Serial.println(F("ERROR: TLS certificate/key load failed")); return false;
     }
     server_.setServerKeyAndCert(key_der, (int)key_len, cert_der, (int)cert_len);
     tls_ok_ = true;
-
-    setup_routes();
-    server_.begin();
+    setup_routes(); server_.begin();
     Serial.println(F("HTTPS server listening on 443"));
-
     Serial.println(F("Duckoustic network"));
     Serial.println(F("------------------"));
     Serial.print(F("SSID: ")); Serial.println(ssid_);
@@ -194,40 +177,24 @@ bool WebUI::begin(PlaybackEngine* playback, LaserOutput* laser,
     Serial.println(F("HTTPS: https://192.168.4.1/"));
     Serial.println(F("mDNS:  https://duckoustic.local/"));
     Serial.println(F("TLS:   certificate loaded"));
-
     return true;
 }
 
 bool WebUI::start_softap() {
     ssid_ = make_ssid();
-
     WiFi.mode(WIFI_AP);
-
-    IPAddress ap_ip(192, 168, 4, 1);
-    IPAddress gateway(192, 168, 4, 1);
-    IPAddress subnet(255, 255, 255, 0);
-    if (!WiFi.softAPConfig(ap_ip, gateway, subnet)) {
+    IPAddress ap_ip(192, 168, 4, 1), gateway(192, 168, 4, 1), subnet(255, 255, 255, 0);
+    if (!WiFi.softAPConfig(ap_ip, gateway, subnet))
         Serial.println(F("WARN: softAPConfig failed — continuing with defaults"));
-    }
-
-    bool ok;
-    if (strlen(DUCK_AP_PASSWORD) == 0) {
-        ok = WiFi.softAP(ssid_.c_str(), nullptr, DUCK_AP_CHANNEL, 0, DUCK_AP_MAX_CONN);
-    } else {
-        ok = WiFi.softAP(ssid_.c_str(), DUCK_AP_PASSWORD, DUCK_AP_CHANNEL, 0, DUCK_AP_MAX_CONN);
-    }
-    if (!ok) {
-        return false;
-    }
+    bool ok = (strlen(DUCK_AP_PASSWORD) == 0)
+        ? WiFi.softAP(ssid_.c_str(), nullptr, DUCK_AP_CHANNEL, 0, DUCK_AP_MAX_CONN)
+        : WiFi.softAP(ssid_.c_str(), DUCK_AP_PASSWORD, DUCK_AP_CHANNEL, 0, DUCK_AP_MAX_CONN);
+    if (!ok) return false;
     delay(150);
-
     if (MDNS.begin("duckoustic")) {
         MDNS.addService("https", "tcp", 443);
         Serial.println(F("mDNS: https://duckoustic.local/"));
-    } else {
-        Serial.println(F("WARN: mDNS start failed (IP URL still works)"));
-    }
-
+    } else Serial.println(F("WARN: mDNS start failed (IP URL still works)"));
     return true;
 }
 
@@ -249,8 +216,7 @@ void WebUI::setup_routes() {
     server_.on("/api/mode", HTTP_POST, [this]() { handle_mode(); });
     server_.on("/api/loop", HTTP_POST, [this]() { handle_loop(); });
     server_.on("/api/upload", HTTP_POST,
-        [this]() { handle_upload_finish(); },
-        [this]() { handle_upload(); });
+        [this]() { handle_upload_finish(); }, [this]() { handle_upload(); });
     server_.onNotFound([this]() { handle_not_found(); });
 }
 
@@ -284,10 +250,24 @@ void WebUI::handle_status() {
         doc["play_state"] = st;
     } else doc["file"] = false;
     if (optical_ && optical_->ready()) {
-        doc["optical_dc"] = optical_->get_dc_level();
-        doc["optical_p2p"] = optical_->get_signal_level();
-        doc["signal"] = optical_->get_signal_level() >= DUCK_SIGNAL_THRESHOLD;
-    } else doc["signal"] = false;
+        doc["optical_dc"] = optical_->get_dc_level_left();
+        doc["optical_p2p"] = optical_->get_signal_level_left();
+        doc["signal"] = optical_->get_signal_level_left() >= DUCK_SIGNAL_THRESHOLD;
+        JsonObject opt = doc["optical"].to<JsonObject>();
+        opt["mode"] = (optical_->channel_mode() == OpticalChannelMode::Stereo) ? "stereo" : "mono";
+        opt["left_adc"] = optical_->last_raw_left();
+        opt["right_adc"] = optical_->last_raw_right();
+        opt["left_pin"] = DUCK_ADC_LEFT_PIN;
+        opt["right_pin"] = DUCK_ADC_RIGHT_PIN;
+        opt["left_p2p"] = optical_->get_signal_level_left();
+        opt["right_p2p"] = optical_->get_signal_level_right();
+    } else {
+        doc["signal"] = false;
+        JsonObject opt = doc["optical"].to<JsonObject>();
+        opt["mode"] = optical_stereo_ ? "stereo" : "mono";
+        opt["left_adc"] = 0; opt["right_adc"] = 0;
+        opt["left_pin"] = DUCK_ADC_LEFT_PIN; opt["right_pin"] = DUCK_ADC_RIGHT_PIN;
+    }
     String out; serializeJson(doc, out);
     server_.send(200, "application/json", out);
 }
@@ -295,14 +275,10 @@ void WebUI::handle_status() {
 void WebUI::handle_network() {
     JsonDocument doc;
     doc["ssid"] = ssid_.length() ? ssid_ : make_ssid();
-    doc["ip"] = "192.168.4.1";
-    doc["gateway"] = "192.168.4.1";
-    doc["subnet"] = "255.255.255.0";
-    doc["https_port"] = 443;
-    doc["mdns"] = "duckoustic.local";
-    doc["tls"] = tls_ok_;
-    String out;
-    serializeJson(doc, out);
+    doc["ip"] = "192.168.4.1"; doc["gateway"] = "192.168.4.1";
+    doc["subnet"] = "255.255.255.0"; doc["https_port"] = 443;
+    doc["mdns"] = "duckoustic.local"; doc["tls"] = tls_ok_;
+    String out; serializeJson(doc, out);
     server_.send(200, "application/json", out);
 }
 
@@ -310,40 +286,31 @@ void WebUI::handle_upload() {
     HTTPUpload& upload = server_.upload();
     if (upload.status == UPLOAD_FILE_START) {
         upload_ok_ = false; last_filename_ = upload.filename;
-        Serial.print(F("Upload start: ")); Serial.println(last_filename_);
         if (playback_) playback_->stop();
         LittleFS.remove(DUCK_AUDIO_PATH);
-        File f = LittleFS.open(DUCK_AUDIO_PATH, "w");
-        if (!f) { Serial.println(F("Failed to open file for write")); return; }
-        f.close();
+        File f = LittleFS.open(DUCK_AUDIO_PATH, "w"); if (f) f.close();
     } else if (upload.status == UPLOAD_FILE_WRITE) {
         if (upload.totalSize > DUCK_MAX_UPLOAD_BYTES) return;
         File f = LittleFS.open(DUCK_AUDIO_PATH, "a");
         if (f) { f.write(upload.buf, upload.currentSize); f.close(); }
-    } else if (upload.status == UPLOAD_FILE_END) {
-        Serial.print(F("Upload end, bytes=")); Serial.println(upload.totalSize);
-        upload_ok_ = true;
-    }
+    } else if (upload.status == UPLOAD_FILE_END) upload_ok_ = true;
 }
 
 void WebUI::handle_upload_finish() {
     JsonDocument doc;
     if (!upload_ok_) {
         doc["ok"] = false; doc["error"] = "upload failed";
-        String out; serializeJson(doc, out);
-        server_.send(400, "application/json", out); return;
+        String out; serializeJson(doc, out); server_.send(400, "application/json", out); return;
     }
     if (!playback_ || !playback_->load(LittleFS, DUCK_AUDIO_PATH)) {
         doc["ok"] = false; doc["error"] = "invalid WAV (need mono 8 kHz 16-bit PCM)";
         LittleFS.remove(DUCK_AUDIO_PATH);
-        String out; serializeJson(doc, out);
-        server_.send(400, "application/json", out); return;
+        String out; serializeJson(doc, out); server_.send(400, "application/json", out); return;
     }
     doc["ok"] = true; doc["filename"] = last_filename_;
     doc["duration"] = playback_->duration_sec();
     doc["sample_rate"] = playback_->info().sample_rate;
-    String out; serializeJson(doc, out);
-    server_.send(200, "application/json", out);
+    String out; serializeJson(doc, out); server_.send(200, "application/json", out);
 }
 
 void WebUI::handle_play() {
@@ -375,7 +342,19 @@ void WebUI::apply_mode(Mode m) {
 }
 void WebUI::handle_mode() {
     String body = server_.arg("plain"); body.toLowerCase();
-    apply_mode(body.indexOf("listen") >= 0 ? Mode::Listen : Mode::Clone);
+    if (body.indexOf("stereo") >= 0) {
+        optical_stereo_ = true;
+        if (optical_) optical_->set_channel_mode(OpticalChannelMode::Stereo);
+        apply_mode(Mode::Listen);
+    } else if (body.indexOf("listen") >= 0) {
+        optical_stereo_ = false;
+        if (optical_) optical_->set_channel_mode(OpticalChannelMode::Mono);
+        apply_mode(Mode::Listen);
+    } else {
+        optical_stereo_ = false;
+        if (optical_) optical_->set_channel_mode(OpticalChannelMode::Mono);
+        apply_mode(Mode::Clone);
+    }
     server_.send(200, "application/json", "{\"ok\":true}");
 }
 void WebUI::handle_loop() {
