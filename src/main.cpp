@@ -1,22 +1,9 @@
 /**
  * Duckoustic v0.2.2
  *
- * Browser-first optical microphone / dual-channel audio output.
- *
- *   BPW34 → GPIO4 ADC  →  ListenEngine / telemetry
- *   WAV   → PlaybackEngine
- *              ↓
- *        LaserOutput (stereo PWM)
- *              ↓
- *   GPIO5 → PAM8403 IN-L     GPIO6 → PAM8403 IN-R
- *              ↓                      ↓
- *        PAM power stage (L+/L-, R+/R- — not driven by GPIO)
- *
- *   LISTEN  BPW34 → ADC → ListenEngine → dual mono on GPIO5+GPIO6
- *   CLONE   WAV file    → PlaybackEngine → dual mono on GPIO5+GPIO6
- *
- * SoftAP WebUI is served over HTTPS (TCP 443), not plain HTTP.
- * PlaybackEngine / ListenEngine do not know about Wi-Fi.
+ * SoftAP HTTPS WebUI on TCP 443.
+ * Primary:  https://192.168.4.1/
+ * Secondary: https://duckoustic.local/
  */
 
 #include <Arduino.h>
@@ -74,14 +61,13 @@ void setup() {
     Serial.println(F(" Hz"));
     Serial.println(F("Boundary: GPIO5/6 → PAM IN-L/IN-R (not speaker terminals)"));
     Serial.println(F("LISTEN: optical passthrough when mode=listen + laser ON"));
-    Serial.println(F("Ready — connect phone to SoftAP, open https://192.168.4.1/"));
+    Serial.println(F("Ready — join SoftAP, open https://192.168.4.1/ or https://duckoustic.local/"));
     Serial.println();
 }
 
 void loop() {
     web.handle();
 
-    // Always acquire; telemetry + LISTEN both need blocks
     if (optical.sample()) {
         BlockStats stats = processor.process(optical);
         telemetry.update(stats, optical.get_sample_rate());

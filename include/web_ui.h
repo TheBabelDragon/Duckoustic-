@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <LittleFS.h>
+#include <ESPmDNS.h>
 #include <ESPWebServerSecure.hpp>
 #include "config.h"
 #include "playback_engine.h"
@@ -16,19 +17,18 @@ namespace duckoustic {
 /**
  * SoftAP + HTTPS browser UI (TLS on TCP 443).
  *
- * Endpoints (all over HTTPS):
+ * Primary:  https://192.168.4.1/
+ * Secondary: https://duckoustic.local/  (mDNS)
+ *
+ * Endpoints:
  *   GET  /           → HTML UI
  *   GET  /api/status → JSON status
+ *   GET  /api/network→ SoftAP / TLS diagnostics
  *   POST /api/upload → multipart WAV upload
- *   POST /api/play   → start playback (CLONE)
- *   POST /api/stop   → stop playback
- *   POST /api/laser  → body: on|off
- *   POST /api/gain   → body: 0.0–1.0
- *   POST /api/mode   → body: listen|clone
- *   POST /api/loop   → body: 0|1
+ *   POST /api/play | /stop | /laser | /gain | /mode | /loop
  *
- * Self-signed device cert for https://192.168.4.1/ — browsers may warn.
- * No external CA, router, or Internet required.
+ * Self-signed device cert (SAN IP:192.168.4.1 + DNS:duckoustic.local).
+ * No WiFiManager, no external router, no Internet required.
  */
 class WebUI {
 public:
@@ -38,7 +38,6 @@ public:
                OpticalInput* optical, SignalProcessor* processor,
                ListenEngine* listen);
 
-    /** Call from loop() — services HTTPS clients. */
     void handle();
 
     enum class Mode : uint8_t { Listen = 0, Clone = 1 };
@@ -46,12 +45,13 @@ public:
 
 private:
     void setup_routes();
-    void start_softap();
+    bool start_softap();
     String make_ssid() const;
     void apply_mode(Mode m);
 
     void handle_root();
     void handle_status();
+    void handle_network();
     void handle_upload();
     void handle_upload_finish();
     void handle_play();
@@ -72,6 +72,8 @@ private:
     bool             loop_en_   = false;
     String           last_filename_;
     bool             upload_ok_ = false;
+    bool             tls_ok_    = false;
+    String           ssid_;
 };
 
 } // namespace duckoustic

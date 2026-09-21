@@ -1,36 +1,36 @@
 #pragma once
-// TLS private key. Device-local SoftAP only — not a public CA key.
-// CN/SAN: 192.168.4.1 — self-signed SoftAP HTTPS.
+// TLS private key (RSA 2048). Device-local SoftAP only.
+// Do not reuse outside this firmware image.
 #ifndef DUCKOUSTIC_KEY_H
 #define DUCKOUSTIC_KEY_H
 
 // Base64 DER; decoded at runtime in WebUI::begin()
 static const char duckoustic_key_b64[] =
-"MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDg9ftssR8h7LMc"
-"R3behTh5v5PR5UJLFTYm81ZOzKqrItLN0PE7CyUUzak9DVkVeM/vn9cWc1I8iz7Y"
-"gs1X3BkSdLUlqX+yGUAJv4A239+v8erY1iu5zNXBabqmsUlbNbIP3B3VLvhqcHeU"
-"6wmNqvokUOM0wsZArgpTXfeO/BeUkMhEe1yjTSopJj6VjZt38/AGvEaZxnt1lRxf"
-"MOBumt4lXUig+m0jP3u6vjmite3uP6QpluG46FNPwJM/K0oftGpuMNpsZpAZosKD"
-"J1Zdp7S7sdU9hf58TnC38RbuNRMbpBK/+TYkscwFFqqbR39fW+AfzIt5eRmVPTe4"
-"lmz3J9dtAgMBAAECggEAL50AlRW8ACMoGbEqgJhzxpj8wW0jpd6ccowIVW9OJCCf"
-"u34gwJ1wQMHyswBTPY8ve4k6Lf9EhZn3OD4fFhx4lgZrnMgORfTAMA//JB4oKwYp"
-"7bEO2il3iJNHNSbK3uozgNXW3pstauHY/YTtpbVtcihIno8nBOORPenijrneh8vj"
-"Xx/RDUxw25s0AQcL+WKmKWMWE9UnMuNj+MlU7XCxi2nCTSIuYmwUyiHzQFFayK3J"
-"StP1VVyD4pZf2nlOJAZK28bfCEPTZdAVhP5EilIPZWFoUTe7W1y9I2RJg9o/m7zy"
-"c2jb3ZCsmyljNYl3Z6azGkZdmr45d055YLQlwmXO5QKBgQD5KXhI1lZSPwp/pBkk"
-"5FHeUJTiwfeuqk7PS/q3obHi5twWIiZeBB0Uo2/fBxwP/Z5ZOhvutT7isonNph6B"
-"z6mINVeQfUFNb7nxsuqA+VZpIeyVQQgKZMdeT8qkwZb1cuOLe9dgX5bLOqX8ETon"
-"MR2o8NVdUAUlquItdOMTlFvbnwKBgQDnInuuvBYo8/G1+CwBfDz1WCdv0oG6ZJNp"
-"cDRf27M9DjNIQbsY6RZY4EtR8nYPldqipPg+FiOOo8eH4nITKcaUvlNuwDvNFrKD"
-"Pg2rUf+UEX8pFvAvIVNsZQ9qN58kEEdYJFh6PW1ZfgPSo+CzdfEX63uMHkWbQzik"
-"9Rsw9S1xcwKBgA8OKm58RQsDNCcySzKneSrtw5FQFx8+uzRbavLdmloTiQjtV1Qm"
-"+3rbxU68pz1wHblWgYmS+hHIp/r9JqrBWYUZdAkPCHsdXSb1oKXaaxY/LoR2QX4f"
-"SMyyFZSO/ggmwQkUmpcAL6RoDs+EWvczSI+Evd+9jhIQmUoV3gK43DQRAoGAIgQM"
-"KcoahMpp/zrX1xweqIjhvO5BE1pr62+M9bKSrWCioXay/1aGaGwSCaxiPabzN06K"
-"DjEZ6Isn+VKVMUbLp+ZexwTZiDRX70K5pkX6FCODEFwE2xrPeTtiSmKHNDqFFW67"
-"6rmRl0MZcu2VSzQHWFraouNtoQ0CkBxWdR0QJAsCgYEA4p65ECuIlHpL7ovcdtAp"
-"PnYjJErFEDA+fktnRrnt0oe4OWCWRKjwXl1z3MRVznHWmrZLIjHHQAaQ2TGu/sSH"
-"oWDEXWOmEcax5AeXQBcHZ6fZUvW7RtrzDGbup03w/T45gSAwtZJWHl9KWQeZcAWi"
-"pHewGungkjoQwYdYMa5IQbM=";
+"MIIEvwIBADANBgkqhkiG9w0BAQEFAASCBKkwggSlAgEAAoIBAQDU8fI9JoYOPLow"
+"ov28KANM7lfcBOHU950WYtkSjJmHkTqZucesNDlHAiuYAia5kLuIFhYy7YdKwW+5"
+"Bk4apw3HPUWNQRykrim0s2ONIEDuYl1roNfEfwFbEttKLNuEOHEvzIMNdjZbvb5v"
+"7RrFUQEH1hVaEdljeZ1HHDtsvQ29Am4Zbgmy8Bhkz0KEDp3wkFlkGCaduQqDtLI/"
+"PkmdCj2K9gUrJ59QY6vC5sp2LituySF596040rHvO8I5Ype1X5NPC5pEh69nZNiq"
+"6ZPRtqSVpoFMUJe7TfXJ6WEUlLBS0XG8oumb37zKYdv1mfNhvKdMtko2Zgl1OQHi"
+"MWQSPeJ/AgMBAAECggEAPuHnr8klgyTJsr0fAqYqO1iS12UVr0cju02bXo/ocpEf"
+"Ze/nl+GgHGj2qJ/SAbBMwKYNDiL4dcnjjRbgj5xPREvCszDMHZFUvYjP2AfzRLIF"
+"dlf7/4mlw9gwq5nNhSEJw5y4AoyrBrJkfzbcVfJSxJainYNx1589I5ehsL2vReXc"
+"W+5VrIJ+vI3zKG58HQGyimr/4aPocO+EppBp0RWptSLh2Q916jwyehNK/ldRaPPw"
+"dMzFG6qJT9VSdPpP3k6fndVXEyFhoKNfq7OzYAm2gWD5I/BMlZ7kvQYp1pPv1iDg"
+"glz88Wq0ZKAm0FLf3NYbq1A4rZlpgzjVPasBvT9k8QKBgQD/Y0pQAzSs9YMd/qP5"
+"RNodNzOcq5C3tNfvsJEbxOSaRTz9Uq+8sYev10yWABaf1ernBcVC+/8mdputqzDr"
+"AvSo3EVAQnU47xtPa+p4aXryfDeacAa0I6A4+gCALqkIQxqht9ol8SlJnYzovJTu"
+"XoE13G/jpNvaAKJ/9YJD2c2M6QKBgQDVdJzK4oMJ++azlt5yTjgqbAXADYrHH42f"
+"b6SW0IV6Ee16xUHc23EUbZU+WO76gntYHUX0L5OgtdlXEx/fMWYxx83yFVNxCG6R"
+"+brt6BR0WaYAoTGVGVvg31/aLogVnTrwF92UvfbHoYw+XUFIla3OGDfZnTgGd4h+"
+"Ns9iJSMzJwKBgQCx/RYum31byaP/BJhtQqIs2GsdFqk+j0grocgQLXIRXo36E2Wt"
+"QaFKWOfkZt1dui4Doo7vd0dFHEa1i+kE8UNoaFPPTEH8UxCakqCQGRt54j6yYL8b"
+"TvT8oKg2rc5alsH50XO1G9Vlm+s3zS6SzsSIsEA+zIf48JZQTd/iv+o0+QKBgQDM"
+"UCRMJmgbRFxchgpCCxDDukX+wHeXhWI/u9Mk8E7yuvo+y1Txm7IvRXzXArUsX3zE"
+"qLBuvKNn7ugr6ohVUKlq+L7t+u+1f8amPw1n7v61J6I3dBNLjcxeADF1W5iyZ58k"
+"dROI7hOqnbzpbMWyPmLwpEnBKDWaKwwhE0GJxdZdfQKBgQCZLI/WYmfaSTqhzR4+"
+"tWHxBamy4QWOl8w9t7/tZHjn7O1MXZ2ko3UAiUKByN2jEsp0E+6DQ5cub+kCeEg2"
+"RD5GjZV+og/q5uTyFRotZPsb7vwiININCPllC6+IRgHAQJbkblyQDbet044Sn3HC"
+"iTK2r1LWSesLHBWTse5eMbGw9g==";
 
 #endif // DUCKOUSTIC_KEY_H
