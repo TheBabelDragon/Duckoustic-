@@ -2,8 +2,8 @@
 
 #include <Arduino.h>
 #include <WiFi.h>
-#include <WebServer.h>
 #include <LittleFS.h>
+#include <ESPWebServerSecure.hpp>
 #include "config.h"
 #include "playback_engine.h"
 #include "listen_engine.h"
@@ -14,9 +14,9 @@
 namespace duckoustic {
 
 /**
- * SoftAP + minimal browser UI.
+ * SoftAP + HTTPS browser UI (TLS on TCP 443).
  *
- * Endpoints:
+ * Endpoints (all over HTTPS):
  *   GET  /           → HTML UI
  *   GET  /api/status → JSON status
  *   POST /api/upload → multipart WAV upload
@@ -26,16 +26,19 @@ namespace duckoustic {
  *   POST /api/gain   → body: 0.0–1.0
  *   POST /api/mode   → body: listen|clone
  *   POST /api/loop   → body: 0|1
+ *
+ * Self-signed device cert for https://192.168.4.1/ — browsers may warn.
+ * No external CA, router, or Internet required.
  */
 class WebUI {
 public:
-    WebUI() : server_(80) {}
+    WebUI() : server_(443) {}
 
     bool begin(PlaybackEngine* playback, LaserOutput* laser,
                OpticalInput* optical, SignalProcessor* processor,
                ListenEngine* listen);
 
-    /** Call from loop() — handles HTTP clients. */
+    /** Call from loop() — services HTTPS clients. */
     void handle();
 
     enum class Mode : uint8_t { Listen = 0, Clone = 1 };
@@ -59,7 +62,7 @@ private:
     void handle_loop();
     void handle_not_found();
 
-    WebServer        server_;
+    ESPWebServerSecure server_;
     PlaybackEngine*  playback_  = nullptr;
     ListenEngine*    listen_    = nullptr;
     LaserOutput*     laser_     = nullptr;

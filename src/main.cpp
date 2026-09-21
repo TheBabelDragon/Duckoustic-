@@ -15,6 +15,7 @@
  *   LISTEN  BPW34 → ADC → ListenEngine → dual mono on GPIO5+GPIO6
  *   CLONE   WAV file    → PlaybackEngine → dual mono on GPIO5+GPIO6
  *
+ * SoftAP WebUI is served over HTTPS (TCP 443), not plain HTTP.
  * PlaybackEngine / ListenEngine do not know about Wi-Fi.
  */
 
@@ -55,7 +56,7 @@ void setup() {
     listen.begin(&laser);
 
     if (!web.begin(&playback, &laser, &optical, &processor, &listen)) {
-        Serial.println(F("FATAL: WebUI / SoftAP init failed"));
+        Serial.println(F("FATAL: HTTPS server initialization failed"));
         while (true) delay(1000);
     }
 
@@ -73,7 +74,7 @@ void setup() {
     Serial.println(F(" Hz"));
     Serial.println(F("Boundary: GPIO5/6 → PAM IN-L/IN-R (not speaker terminals)"));
     Serial.println(F("LISTEN: optical passthrough when mode=listen + laser ON"));
-    Serial.println(F("Ready — connect phone to SoftAP, open http://192.168.4.1/"));
+    Serial.println(F("Ready — connect phone to SoftAP, open https://192.168.4.1/"));
     Serial.println();
 }
 
