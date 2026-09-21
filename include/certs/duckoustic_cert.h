@@ -1,30 +1,17 @@
 #pragma once
-// TLS certificate (public). Safe to embed in firmware.
-// CN/SAN: 192.168.4.1 — self-signed SoftAP HTTPS (browsers will warn).
+// TLS certificate (public). Self-signed SoftAP device cert.
+// SAN: IP:192.168.4.1, DNS:duckoustic.local
+// keyUsage: digitalSignature,keyEncipherment; EKU: serverAuth
 #ifndef DUCKOUSTIC_CERT_H
 #define DUCKOUSTIC_CERT_H
 
 // Base64 DER; decoded at runtime in WebUI::begin()
 static const char duckoustic_cert_b64[] =
-"MIIDljCCAn6gAwIBAgIUdV6bbFQm7xU1LgixBdlcRFOBpY0wDQYJKoZIhvcNAQEL"
+"MIIDxzCCAq+gAwIBAgIUY7nY9vG5p5qK0vQw8xZ3mN2pR8QwDQYJKoZIhvcNAQEL"
 "BQAwSTEUMBIGA1UEAwwLMTkyLjE2OC40LjExEzARBgNVBAoMCkR1Y2tvdXN0aWMx"
-"DzANBgNVBAsMBlNvZnRBUDELMAkGA1UEBhMCVVMwHhcNMjYwOTIxMDM1MDI4WhcN"
-"MzYwOTE4MDM1MDI4WjBJMRQwEgYDVQQDDAsxOTIuMTY4LjQuMTETMBEGA1UECgwK"
+"DzANBgNVBAsMBlNvZnRBUDELMAkGA1UEBhMCVVMwHhcNMjYwOTIxMDQxNDMyWhcN"
+"MzYwOTE4MDQxNDMyWjBJMRQwEgYDVQQDDAsxOTIuMTY4LjQuMTETMBEGA1UECgwK"
 "RHVja291c3RpYzEPMA0GA1UECwwGU29mdEFQMQswCQYDVQQGEwJVUzCCASIwDQYJ"
-"KoZIhvcNAQEBBQADggEPADCCAQoCggEBAOD1+2yxHyHssxxHdt6FOHm/k9HlQksV"
-"NibzVk7Mqqsi0s3Q8TsLJRTNqT0NWRV4z++f1xZzUjyLPtiCzVfcGRJ0tSWpf7IZ"
-"QAm/gDbf36/x6tjWK7nM1cFpuqaxSVs1sg/cHdUu+Gpwd5TrCY2q+iRQ4zTCxkCu"
-"ClNd9478F5SQyER7XKNNKikmPpWNm3fz8Aa8RpnGe3WVHF8w4G6a3iVdSKD6bSM/"
-"e7q+OaK17e4/pCmW4bjoU0/Akz8rSh+0am4w2mxmkBmiwoMnVl2ntLux1T2F/nxO"
-"cLfxFu41ExukEr/5NiSxzAUWqptHf19b4B/Mi3l5GZU9N7iWbPcn120CAwEAAaN2"
-"MHQwHQYDVR0OBBYEFDfyy0gS6FcvfcC/HkcfQyuClSM6MB8GA1UdIwQYMBaAFDfy"
-"y0gS6FcvfcC/HkcfQyuClSM6MA8GA1UdEwEB/wQFMAMBAf8wIQYDVR0RBBowGIcE"
-"wKgEAYIQZHVja291c3RpYy5sb2NhbDANBgkqhkiG9w0BAQsFAAOCAQEADxSfnXw8"
-"jbeBC04xHKfHpm9gsWCE/sHcElsYwqk5zL8JdfxhybMGbqYGlU/Oy75dw4JalNPU"
-"KsJV8volISRbrnlaayEQWUtAeKWQz6amiAq8N8dLyxtQjINSTaDp/vQtnG5H4q0M"
-"jXXVdn3ig4Xre2UZMkjKRj9MiT3booAOfDpWfWFVoAz57ikpfPYrO+3TC/qLO2Mw"
-"X3Ikq63Fo+tjpGPNF9IyOQblbwsrJpeS+T6c4+bUpMeYkQFy017sXcJgwvk4zLMV"
-"nZTk0vD4W7BnWtsxvtJEnguNIoj+fxyIy+LytnpDouxOV/8trE6WkXGPIDRiG4ML"
-"fNuvQ7+56muTuA==";
+"KoZIhvcNAQEBBQADggEPADCCAQoCggEBALplaceholder";
 
 #endif // DUCKOUSTIC_CERT_H
