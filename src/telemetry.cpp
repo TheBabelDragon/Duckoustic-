@@ -4,16 +4,16 @@ namespace duckoustic {
 
 void Telemetry::begin() {
     Serial.begin(DUCK_SERIAL_BAUD);
-    // Give USB-CDC a moment on boards that need it
     delay(300);
 }
 
 void Telemetry::print_banner() {
     Serial.println();
-    Serial.println(F("DUCKOUSTIC v0.1"));
+    Serial.println(F("DUCKOUSTIC v0.2"));
     Serial.println(F("BPW34 INPUT: READY"));
-    Serial.println(F("LASER INPUT: EXTERNAL"));
-    Serial.println(F("TARGET: OPTICAL VIBRATION"));
+    Serial.println(F("LASER OUTPUT: PWM"));
+    Serial.println(F("TRANSPORT: Wi-Fi SoftAP + browser"));
+    Serial.println(F("TARGET: optical vibration + clone playback"));
     Serial.println();
 }
 
@@ -39,12 +39,6 @@ void Telemetry::update(const BlockStats& stats, uint32_t sample_rate_hz) {
     Serial.print(stats.rms, 1);
     Serial.print(F(" signal="));
     Serial.println(stats.signal_present ? F("SIGNAL_DETECTED") : F("NO_SIGNAL"));
-
-#if DUCK_RAW_DEBUG
-    // Occasional raw peek (first 8 samples of the block)
-    const int16_t* raw = nullptr; // caller would need to pass it; kept minimal
-    (void)raw;
-#endif
 }
 
 } // namespace duckoustic
