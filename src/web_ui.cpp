@@ -154,17 +154,22 @@ refresh(); setInterval(refresh, 1500);
 bool WebUI::begin(PlaybackEngine* playback, LaserOutput* laser,
                   OpticalInput* optical, SignalProcessor* processor,
                   ListenEngine* listen) {
-    playback_ = playback; laser_ = laser; optical_ = optical;
-    processor_ = processor; listen_ = listen;
+    playback_ = playback;
+    laser_    = laser;
+    optical_  = optical;
+    processor_ = processor;
+    listen_   = listen;
+    tls_ok_   = false;
 
     if (!LittleFS.begin(true)) {
         Serial.println(F("LittleFS mount failed"));
         return false;
     }
 
-    start_softap();
-    Serial.print(F("SoftAP SSID: ")); Serial.println(make_ssid());
-    Serial.print(F("SoftAP IP:   ")); Serial.println(WiFi.softAPIP());
+    if (!start_softap()) {
+        Serial.println(F("ERROR: SoftAP failed to start"));
+        return false;
+    }
 
     static uint8_t cert_der[2048];
     static uint8_t key_der[2048];
@@ -172,28 +177,58 @@ bool WebUI::begin(PlaybackEngine* playback, LaserOutput* laser,
     if (!decode_b64(duckoustic_cert_b64, cert_der, sizeof(cert_der), &cert_len) ||
         !decode_b64(duckoustic_key_b64, key_der, sizeof(key_der), &key_len) ||
         cert_len == 0 || key_len == 0) {
-        Serial.println(F("FATAL: HTTPS server initialization failed (TLS material)"));
+        Serial.println(F("ERROR: TLS certificate/key load failed"));
         return false;
     }
     server_.setServerKeyAndCert(key_der, (int)key_len, cert_der, (int)cert_len);
+    tls_ok_ = true;
 
     setup_routes();
     server_.begin();
-    Serial.println(F("HTTPS server started"));
-    Serial.println(F("HTTPS port:  443"));
-    Serial.println(F("HTTPS URL:   https://192.168.4.1/"));
+    Serial.println(F("HTTPS server listening on 443"));
+
+    Serial.println(F("Duckoustic network"));
+    Serial.println(F("------------------"));
+    Serial.print(F("SSID: ")); Serial.println(ssid_);
+    Serial.println(F("AP IP: 192.168.4.1"));
+    Serial.println(F("HTTPS: https://192.168.4.1/"));
+    Serial.println(F("mDNS:  https://duckoustic.local/"));
+    Serial.println(F("TLS:   certificate loaded"));
+
     return true;
 }
 
-void WebUI::start_softap() {
-    String ssid = make_ssid();
+bool WebUI::start_softap() {
+    ssid_ = make_ssid();
+
     WiFi.mode(WIFI_AP);
-    if (strlen(DUCK_AP_PASSWORD) == 0)
-        WiFi.softAP(ssid.c_str(), nullptr, DUCK_AP_CHANNEL, 0, DUCK_AP_MAX_CONN);
-    else
-        WiFi.softAP(ssid.c_str(), DUCK_AP_PASSWORD, DUCK_AP_CHANNEL, 0, DUCK_AP_MAX_CONN);
-    delay(100);
-    Serial.println(F("SoftAP started"));
+
+    IPAddress ap_ip(192, 168, 4, 1);
+    IPAddress gateway(192, 168, 4, 1);
+    IPAddress subnet(255, 255, 255, 0);
+    if (!WiFi.softAPConfig(ap_ip, gateway, subnet)) {
+        Serial.println(F("WARN: softAPConfig failed — continuing with defaults"));
+    }
+
+    bool ok;
+    if (strlen(DUCK_AP_PASSWORD) == 0) {
+        ok = WiFi.softAP(ssid_.c_str(), nullptr, DUCK_AP_CHANNEL, 0, DUCK_AP_MAX_CONN);
+    } else {
+        ok = WiFi.softAP(ssid_.c_str(), DUCK_AP_PASSWORD, DUCK_AP_CHANNEL, 0, DUCK_AP_MAX_CONN);
+    }
+    if (!ok) {
+        return false;
+    }
+    delay(150);
+
+    if (MDNS.begin("duckoustic")) {
+        MDNS.addService("https", "tcp", 443);
+        Serial.println(F("mDNS: https://duckoustic.local/"));
+    } else {
+        Serial.println(F("WARN: mDNS start failed (IP URL still works)"));
+    }
+
+    return true;
 }
 
 String WebUI::make_ssid() const {
@@ -206,6 +241,7 @@ String WebUI::make_ssid() const {
 void WebUI::setup_routes() {
     server_.on("/", HTTP_GET, [this]() { handle_root(); });
     server_.on("/api/status", HTTP_GET, [this]() { handle_status(); });
+    server_.on("/api/network", HTTP_GET, [this]() { handle_network(); });
     server_.on("/api/play", HTTP_POST, [this]() { handle_play(); });
     server_.on("/api/stop", HTTP_POST, [this]() { handle_stop(); });
     server_.on("/api/laser", HTTP_POST, [this]() { handle_laser(); });
@@ -224,7 +260,7 @@ void WebUI::handle_root() { server_.send_P(200, "text/html", INDEX_HTML); }
 void WebUI::handle_status() {
     JsonDocument doc;
     doc["ok"] = true;
-    doc["ssid"] = make_ssid();
+    doc["ssid"] = ssid_.length() ? ssid_ : make_ssid();
     doc["clients"] = WiFi.softAPgetStationNum();
     doc["mode"] = (mode_ == Mode::Listen) ? "listen" : "clone";
     doc["laser"] = laser_ ? laser_->enabled() : false;
@@ -253,6 +289,20 @@ void WebUI::handle_status() {
         doc["signal"] = optical_->get_signal_level() >= DUCK_SIGNAL_THRESHOLD;
     } else doc["signal"] = false;
     String out; serializeJson(doc, out);
+    server_.send(200, "application/json", out);
+}
+
+void WebUI::handle_network() {
+    JsonDocument doc;
+    doc["ssid"] = ssid_.length() ? ssid_ : make_ssid();
+    doc["ip"] = "192.168.4.1";
+    doc["gateway"] = "192.168.4.1";
+    doc["subnet"] = "255.255.255.0";
+    doc["https_port"] = 443;
+    doc["mdns"] = "duckoustic.local";
+    doc["tls"] = tls_ok_;
+    String out;
+    serializeJson(doc, out);
     server_.send(200, "application/json", out);
 }
 
