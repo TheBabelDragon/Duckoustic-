@@ -20,17 +20,28 @@ bool OpticalInput::initialize() {
         delayMicroseconds(50);
     }
 
-    // Hardware timer: 1 MHz base clock for clean integer division
-    // Alarm every (1 000 000 / sample_rate) ticks → exact sample rate
-    const uint32_t TIMER_HZ = 1000000UL;
-    timer_ = timerBegin(TIMER_HZ);
+    // Target sample period in microseconds
+    const uint32_t alarm_us = 1000000UL / sample_rate_hz_;
+
+#if defined(ESP_ARDUINO_VERSION_MAJOR) && (ESP_ARDUINO_VERSION_MAJOR >= 3)
+    // Arduino-ESP32 3.x: timerBegin(frequency_hz)
+    timer_ = timerBegin(1000000UL);  // 1 MHz tick
     if (!timer_) {
         return false;
     }
-
     timerAttachInterrupt(timer_, &OpticalInput::on_timer);
-    const uint64_t alarm_ticks = TIMER_HZ / sample_rate_hz_;
-    timerAlarm(timer_, alarm_ticks, true, 0);   // auto-reload, unlimited
+    timerAlarm(timer_, alarm_us, true, 0);
+#else
+    // Arduino-ESP32 2.x: timerBegin(num, divider, countUp)
+    // APB 80 MHz / divider 80 → 1 MHz tick; alarm every alarm_us ticks
+    timer_ = timerBegin(0, 80, true);
+    if (!timer_) {
+        return false;
+    }
+    timerAttachInterrupt(timer_, &OpticalInput::on_timer, true);
+    timerAlarmWrite(timer_, alarm_us, true);
+    timerAlarmEnable(timer_);
+#endif
 
     // Pre-fill so the first block is not all zeros
     for (size_t i = 0; i < DUCK_SAMPLES_PER_BLOCK; ++i) {
