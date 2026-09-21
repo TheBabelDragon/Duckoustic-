@@ -1,0 +1,36 @@
+#pragma once
+// TLS private key. Device-local SoftAP only — not a public CA key.
+// CN/SAN: 192.168.4.1 — self-signed SoftAP HTTPS.
+#ifndef DUCKOUSTIC_KEY_H
+#define DUCKOUSTIC_KEY_H
+
+// Base64 DER; decoded at runtime in WebUI::begin()
+static const char duckoustic_key_b64[] =
+"MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDg9ftssR8h7LMc"
+"R3behTh5v5PR5UJLFTYm81ZOzKqrItLN0PE7CyUUzak9DVkVeM/vn9cWc1I8iz7Y"
+"gs1X3BkSdLUlqX+yGUAJv4A239+v8erY1iu5zNXBabqmsUlbNbIP3B3VLvhqcHeU"
+"6wmNqvokUOM0wsZArgpTXfeO/BeUkMhEe1yjTSopJj6VjZt38/AGvEaZxnt1lRxf"
+"MOBumt4lXUig+m0jP3u6vjmite3uP6QpluG46FNPwJM/K0oftGpuMNpsZpAZosKD"
+"J1Zdp7S7sdU9hf58TnC38RbuNRMbpBK/+TYkscwFFqqbR39fW+AfzIt5eRmVPTe4"
+"lmz3J9dtAgMBAAECggEAL50AlRW8ACMoGbEqgJhzxpj8wW0jpd6ccowIVW9OJCCf"
+"u34gwJ1wQMHyswBTPY8ve4k6Lf9EhZn3OD4fFhx4lgZrnMgORfTAMA//JB4oKwYp"
+"7bEO2il3iJNHNSbK3uozgNXW3pstauHY/YTtpbVtcihIno8nBOORPenijrneh8vj"
+"Xx/RDUxw25s0AQcL+WKmKWMWE9UnMuNj+MlU7XCxi2nCTSIuYmwUyiHzQFFayK3J"
+"StP1VVyD4pZf2nlOJAZK28bfCEPTZdAVhP5EilIPZWFoUTe7W1y9I2RJg9o/m7zy"
+"c2jb3ZCsmyljNYl3Z6azGkZdmr45d055YLQlwmXO5QKBgQD5KXhI1lZSPwp/pBkk"
+"5FHeUJTiwfeuqk7PS/q3obHi5twWIiZeBB0Uo2/fBxwP/Z5ZOhvutT7isonNph6B"
+"z6mINVeQfUFNb7nxsuqA+VZpIeyVQQgKZMdeT8qkwZb1cuOLe9dgX5bLOqX8ETon"
+"MR2o8NVdUAUlquItdOMTlFvbnwKBgQDnInuuvBYo8/G1+CwBfDz1WCdv0oG6ZJNp"
+"cDRf27M9DjNIQbsY6RZY4EtR8nYPldqipPg+FiOOo8eH4nITKcaUvlNuwDvNFrKD"
+"Pg2rUf+UEX8pFvAvIVNsZQ9qN58kEEdYJFh6PW1ZfgPSo+CzdfEX63uMHkWbQzik"
+"9Rsw9S1xcwKBgA8OKm58RQsDNCcySzKneSrtw5FQFx8+uzRbavLdmloTiQjtV1Qm"
+"+3rbxU68pz1wHblWgYmS+hHIp/r9JqrBWYUZdAkPCHsdXSb1oKXaaxY/LoR2QX4f"
+"SMyyFZSO/ggmwQkUmpcAL6RoDs+EWvczSI+Evd+9jhIQmUoV3gK43DQRAoGAIgQM"
+"KcoahMpp/zrX1xweqIjhvO5BE1pr62+M9bKSrWCioXay/1aGaGwSCaxiPabzN06K"
+"DjEZ6Isn+VKVMUbLp+ZexwTZiDRX70K5pkX6FCODEFwE2xrPeTtiSmKHNDqFFW67"
+"6rmRl0MZcu2VSzQHWFraouNtoQ0CkBxWdR0QJAsCgYEA4p65ECuIlHpL7ovcdtAp"
+"PnYjJErFEDA+fktnRrnt0oe4OWCWRKjwXl1z3MRVznHWmrZLIjHHQAaQ2TGu/sSH"
+"oWDEXWOmEcax5AeXQBcHZ6fZUvW7RtrzDGbup03w/T45gSAwtZJWHl9KWQeZcAWi"
+"pHewGungkjoQwYdYMa5IQbM=";
+
+#endif // DUCKOUSTIC_KEY_H
