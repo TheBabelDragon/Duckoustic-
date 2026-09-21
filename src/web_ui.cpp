@@ -66,8 +66,8 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(
   <div class="card">
     <label>Mode</label>
     <div class="modes">
-      <label><input type="radio" name="mode" value="listen"> Listen</label>
-      <label><input type="radio" name="mode" value="clone" checked> Clone</label>
+      <label><input type="radio" name="mode" value="listen"> Listen (passthrough)</label>
+      <label><input type="radio" name="mode" value="clone" checked> Clone (file)</label>
     </div>
   </div>
 
@@ -103,8 +103,12 @@ async function refresh() {
   document.querySelectorAll('input[name=mode]').forEach(r => {
     r.checked = (r.value === s.mode);
   });
+  let extra = '';
+  if (s.mode === 'listen') {
+    extra = s.listen_active ? ' · PASSTHROUGH' : ' · passthrough armed (enable laser)';
+  }
   statusEl.textContent = 'AP ' + (s.ssid || '') + ' · clients ' + (s.clients || 0) +
-    ' · mode ' + (s.mode || '') +
+    ' · mode ' + (s.mode || '') + extra +
     (s.signal ? ' · optical SIGNAL' : ' · optical quiet');
 }
 
@@ -156,11 +160,13 @@ setInterval(refresh, 1500);
 )rawliteral";
 
 bool WebUI::begin(PlaybackEngine* playback, LaserOutput* laser,
-                  OpticalInput* optical, SignalProcessor* processor) {
+                  OpticalInput* optical, SignalProcessor* processor,
+                  ListenEngine* listen) {
     playback_  = playback;
     laser_     = laser;
     optical_   = optical;
     processor_ = processor;
+    listen_    = listen;
 
     if (!LittleFS.begin(true)) {
         Serial.println(F("LittleFS mount failed"));
@@ -233,6 +239,8 @@ void WebUI::handle_status() {
     doc["laser"] = laser_ ? laser_->enabled() : false;
     doc["gain"] = laser_ ? laser_->gain() : 0.0f;
     doc["loop"] = loop_en_;
+    doc["listen_active"] = (listen_ && listen_->active());
+    doc["listen_scale"] = DUCK_LISTEN_SCALE;
 
     if (playback_ && playback_->info().valid) {
         doc["file"] = true;
@@ -346,6 +354,10 @@ void WebUI::handle_laser() {
     body.toLowerCase();
     bool on = (body.indexOf("on") >= 0);
     if (laser_) laser_->set_enabled(on);
+    // LISTEN passthrough only emits while laser is enabled
+    if (listen_ && mode_ == Mode::Listen) {
+        listen_->set_active(on);
+    }
     server_.send(200, "application/json", on ? "{\"ok\":true,\"laser\":true}" : "{\"ok\":true,\"laser\":false}");
 }
 
@@ -356,14 +368,26 @@ void WebUI::handle_gain() {
     server_.send(200, "application/json", "{\"ok\":true}");
 }
 
+void WebUI::apply_mode(Mode m) {
+    mode_ = m;
+    if (m == Mode::Listen) {
+        if (playback_) playback_->stop();
+        if (listen_) {
+            // Passthrough follows laser enable; arm engine so blocks flow when laser is on
+            listen_->set_active(laser_ && laser_->enabled());
+        }
+    } else {
+        if (listen_) listen_->set_active(false);
+    }
+}
+
 void WebUI::handle_mode() {
     String body = server_.arg("plain");
     body.toLowerCase();
     if (body.indexOf("listen") >= 0) {
-        mode_ = Mode::Listen;
-        if (playback_) playback_->stop();
+        apply_mode(Mode::Listen);
     } else {
-        mode_ = Mode::Clone;
+        apply_mode(Mode::Clone);
     }
     server_.send(200, "application/json", "{\"ok\":true}");
 }
